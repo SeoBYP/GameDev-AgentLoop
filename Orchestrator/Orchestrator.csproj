@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    루프 소유자(오케스트레이터) 콘솔 앱.
+    의존성 0 (Anthropic 호출도 HttpClient 직통) — DESIGN.md D3의 취지("백엔드는 최소·확정적,
+    버그가 루프에 있음이 명확하도록")를 코드로 드러낸다. 실행 검증은 Unity CLI가 담당.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Orchestrator</RootNamespace>
+    <AssemblyName>orchestrator</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+</Project>

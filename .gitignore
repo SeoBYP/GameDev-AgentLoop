@@ -1,0 +1,70 @@
+# Unity + .NET(orchestrator) .gitignore
+# based on github/gitignore Unity.gitignore
+
+# --- Unity generated ---
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Asset meta / tools
+/[Aa]ssets/AssetStoreTools*
+/[Aa]ssets/Plugins/Editor/JetBrains*
+/[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Auto-generated project/solution files
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+sysinfo.txt
+
+# Builds / packages
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# --- IDE ---
+.vs/
+.idea/
+.gradle/
+*.iws
+out/
+
+# --- .NET orchestrator (Orchestrator/) ---
+[Bb]in/
+[Oo]bj/
+
+# Unity 는 루트에 Assembly-CSharp.csproj 등을 자동 생성하므로 위에서 *.csproj/*.sln 을 무시한다.
+# 단, 손으로 작성한 Orchestrator 프로젝트 파일은 반드시 커밋한다(예외).
+!Orchestrator/**/*.csproj
+!Orchestrator/**/*.sln
+
+# --- Secrets (절대 커밋 금지) ---
+.env
+*.env
+appsettings.*.local.json
+secrets.json
