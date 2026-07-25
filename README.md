@@ -6,6 +6,10 @@
 대부분의 에이전트는 그럴듯하지만 안 도는 코드를 뱉는다. 이 프로젝트는 **생성 → 적용 → 검증 → 수리 → 반복**을
 C# 오케스트레이터가 소유해, "코드 생성"을 **"동작 검증된 결과"** 로 바꾼다. 검증은 Unity CLI(`unity command eval`)로 실행 중인 에디터에서 직접 한다.
 
+![Claude Code를 백엔드로 — API 키 없이 생성→적용→컴파일 검증까지 1스텝 통과](docs/images/claude-backend-run.png)
+
+> **이 AI(Claude Code)를 두뇌로** 꽂아 키 없이 실행 — 로그인 → 생성 → Unity 적용·리컴파일 → **컴파일 통과 ✅** (1스텝).
+
 ## 구조
 - `Assets/` 등 — Unity 프로젝트 (루프의 *타깃*). `com.unity.pipeline` 로 CLI가 에디터를 조작·검증.
 - `Orchestrator/` — C# 콘솔 (루프 소유자). → [Orchestrator/README.md](Orchestrator/README.md)

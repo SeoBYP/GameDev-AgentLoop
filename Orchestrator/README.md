@@ -69,6 +69,15 @@ dotnet run --project Orchestrator -- --demo
 
 ## 첫 마일스톤 결과 (실측)
 
+### 이 AI(Claude Code)를 두뇌로 — 키 없이 (`--claude`)
+
+![claude-code 백엔드 실행 스크린샷](../docs/images/claude-backend-run.png)
+
+로그인 → 스모크 테스트(`OK`) → `--claude` 실행. 실제 AI가 생성한 `Health.cs` 를 루프가 Unity에 적용·리컴파일해
+**1스텝 만에 컴파일 통과** — 별도 API 키 없이 동작한다. (생성된 코드는 클램프·이벤트까지 갖춘 실물: [../Assets/Scripts/Health.cs](../Assets/Scripts/Health.cs))
+
+### 배관 증명 — `--demo`
+
 `--demo` 실행 로그 — **2스텝 만에 자가수리로 컴파일 통과**:
 
 ```
