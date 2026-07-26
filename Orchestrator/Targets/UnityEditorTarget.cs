@@ -94,6 +94,21 @@ public sealed class UnityEditorTarget : IExecTarget
         return new VerifyResult(false, "recompile_status 폴링 타임아웃", new[] { "<recompile timeout>" });
     }
 
+    /// <summary>
+    /// 전제 확인: pipeline 서버에 연결되나(에디터가 열려 있고 서버가 떠 있나).
+    /// recompile_status 가 파싱되면 연결된 것 — 안 되면 AI 호출 전에 빠르게 실패시키는 용도.
+    /// </summary>
+    public async Task<bool> IsConnectedAsync(CancellationToken ct)
+    {
+        try
+        {
+            var res = await RunCommandAsync("recompile_status", ct);
+            return ParseRecompileStatus(res.StdOut) is not null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return false; }
+    }
+
     // ── pipeline 명령/eval 원시 호출 ───────────────────────────────────────────
     private Task<ProcessResult> RunCommandAsync(string command, CancellationToken ct, params string[] extraArgs)
     {

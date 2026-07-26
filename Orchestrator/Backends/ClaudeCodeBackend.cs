@@ -1,4 +1,3 @@
-using System.Text;
 using Orchestrator.Contracts;
 using Orchestrator.Util;
 
@@ -31,7 +30,7 @@ public sealed class ClaudeCodeBackend : IAgentBackend
 
     public async Task<AgentReply> CompleteAsync(AgentContext context, CancellationToken ct)
     {
-        var prompt = BuildPrompt(context);
+        var prompt = PromptText.Flatten(context);
 
         // 파일/셸 도구를 전부 비활성 → 순수 텍스트 생성기로만 동작(오케스트레이터가 적용을 소유).
         string[] backendArgs =
@@ -53,23 +52,6 @@ public sealed class ClaudeCodeBackend : IAgentBackend
 
         var text = res.StdOut;
         return new AgentReply(text, EditParser.Parse(text));
-    }
-
-    // AgentContext(시스템 + 대화 히스토리)를 headless 한 방 프롬프트로 평탄화한다.
-    private static string BuildPrompt(AgentContext context)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine(context.System);
-        sb.AppendLine();
-        sb.AppendLine("아래는 지금까지의 대화 맥락이다. 이어서 다음 어시스턴트 응답을 위 출력 계약대로 내라. 도구를 쓰지 말고 텍스트로만.");
-        sb.AppendLine();
-        foreach (var turn in context.History)
-        {
-            sb.AppendLine(turn.Role == Role.User ? "## USER" : "## ASSISTANT");
-            sb.AppendLine(turn.Content);
-            sb.AppendLine();
-        }
-        return sb.ToString();
     }
 
     // Windows 는 npm 전역 shim(claude.cmd)이라 cmd.exe 로 감싸 PATH 해석을 맡긴다.

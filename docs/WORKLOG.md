@@ -69,4 +69,31 @@
 ### 남은 것 / 다음
 - `--claude` 실행 = `claude` CLI 재로그인 1회면 키 없이 실제 자가수리 동작.
 - (선택) `ApiBackend` 는 `ANTHROPIC_API_KEY` 설정 시 동일 루프.
-- Phase 2 계속: `CodexBackend`(headless) 로 agent-agnostic 대조 + `eval` 기반 플레이모드 assert.
+
+---
+
+## 2026-07 · Phase 2 (일부) — agent-agnostic (CodexBackend)
+
+### 목표
+같은 루프에 **또 다른 독립 CLI 에이전트(Codex)** 를 꽂아, "백엔드는 진짜 교체 가능, 루프가 결과물"을
+두 에이전트로 입증한다.
+
+### 한 일
+- **`CodexBackend`** 구현 — `codex exec --sandbox read-only -o <file>` (파일 변경 차단, 최종 메시지만 파일로).
+  ClaudeCodeBackend 과 동일 패턴. 프롬프트 평탄화는 `Util/PromptText` 로 공유(두 CLI 백엔드 재사용).
+- `Program` 에 `--codex` 추가. 모델은 `--model` 로 지정.
+- **`--codex`(gpt-5.4-mini)로 오브젝트 풀 생성 → 같은 루프가 적용·검증 → 1스텝 통과** ✅.
+  산출물 [../Assets/Scripts/ObjectPool.cs](../Assets/Scripts/ObjectPool.cs) 는 Queue 풀링·널가드까지 갖춘 실물.
+
+### 발견 / 함정 (정직히 기록)
+- **Codex 모델 미스매치** — 사용자 Codex 는 ChatGPT 계정 인증. CLI(0.133.0)가 계정 기본 모델
+  `gpt-5.6-sol` 보다 구버전이라 "requires newer CLI" 오류. models_cache 에서 지원 모델(`gpt-5.5`/`gpt-5.4-mini`)을
+  찾아 `--model` 로 지정해 해결. (인증·배선은 정상 — 프롬프트가 Codex 에 온전히 전달됨을 로그로 확인.)
+- **에디터 liveness** — 세션 도중 GameDev-AgentLoop 에디터가 닫혀 pipeline 서버 미연결
+  (`서버 연결 가능: false`). 그 탓에 `recompile_status` 폴링이 120s 타임아웃(`<recompile timeout>`).
+  → 재실행으로 복구. + **`UnityEditorTarget.IsConnectedAsync` preflight** 추가:
+  루프 시작 전 서버 연결을 확인해, 미연결이면 **AI 호출 전에 즉시 실패**(비용/시간 낭비 방지).
+
+### 남은 것 / 다음
+- 플레이모드 검증: `UnityEditorTarget.EvalAsync` 로 런타임 assert
+  (예: `AddComponent<Health>().TakeDamage(30)` 후 `Current==70` 확인) → `VerifyKind.PlayModeAssert`.

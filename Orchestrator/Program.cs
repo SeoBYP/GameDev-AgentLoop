@@ -37,7 +37,12 @@ if (opts.Demo)
 else if (opts.Claude)
 {
     // "이 AI 채팅"(Claude Code CLI)을 두뇌로 — 별도 API 키 불필요(CLI 로그인만).
-    backend = new ClaudeCodeBackend(opts.Model ?? "sonnet", ClaudeWorkDir());
+    backend = new ClaudeCodeBackend(opts.Model ?? "sonnet", BackendWorkDir("claude"));
+}
+else if (opts.Codex)
+{
+    // Codex CLI 를 두뇌로 — 또 다른 독립 에이전트(agent-agnostic 증명).
+    backend = new CodexBackend(opts.Model, BackendWorkDir("codex"));
 }
 else
 {
@@ -47,9 +52,10 @@ else
         Console.Error.WriteLine(
             """
             백엔드(두뇌)를 고르세요:
-              • 이 AI 채팅으로(키 없이):  orchestrator --claude "목표"    ← Claude Code CLI 로그인 필요
-              • Anthropic API 키로:       환경변수 ANTHROPIC_API_KEY 설정 후  orchestrator "목표"
-              • 키 없이 루프 배관 증명:   orchestrator --demo
+              • 이 AI(Claude Code)로:    orchestrator --claude "목표"   ← claude CLI 로그인 필요
+              • Codex 로:                orchestrator --codex  "목표"   ← codex  CLI 로그인 필요
+              • Anthropic API 키로:      환경변수 ANTHROPIC_API_KEY 설정 후  orchestrator "목표"
+              • 키 없이 루프 배관 증명:  orchestrator --demo
             (키는 절대 레포에 커밋하지 마세요 — CLAUDE.md)
             """);
         return 2;
@@ -60,6 +66,15 @@ else
 // 3) 루프 조립·실행
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+// 전제 확인: pipeline 서버 연결(에디터가 열려 있어야 함). 없으면 AI 호출 전에 빠르게 실패.
+if (!await target.IsConnectedAsync(cts.Token))
+{
+    Console.Error.WriteLine(
+        "Unity pipeline 서버에 연결할 수 없습니다.\n" +
+        "  → GameDev-AgentLoop 를 에디터에서 열고, `unity pipeline list` 의 '서버 연결 가능' 이 true 인지 확인하세요.");
+    return 2;
+}
 
 var loop = new AgentLoop(backend, target, new LoopOptions { MaxSteps = opts.MaxSteps });
 
@@ -98,6 +113,7 @@ static Options ParseArgs(string[] args)
         {
             case "--demo": o.Demo = true; break;
             case "--claude": o.Claude = true; break;
+            case "--codex": o.Codex = true; break;
             case "--max-steps" when i + 1 < args.Length: o.MaxSteps = int.Parse(args[++i]); break;
             case "--project" when i + 1 < args.Length: o.ProjectPath = args[++i]; break;
             case "--model" when i + 1 < args.Length: o.Model = args[++i]; break;
@@ -123,10 +139,10 @@ static string? FindUnityProjectRoot(string start)
     return null;
 }
 
-// ClaudeCodeBackend 격리 작업 폴더(도구가 꺼져 있어도 프로젝트를 못 건드리게).
-static string ClaudeWorkDir()
+// CLI 백엔드 격리 작업 폴더(샌드박스가 꺼져 있어도 프로젝트를 못 건드리게).
+static string BackendWorkDir(string name)
 {
-    var dir = Path.Combine(Path.GetTempPath(), "orchestrator-claude-backend");
+    var dir = Path.Combine(Path.GetTempPath(), $"orchestrator-{name}-backend");
     Directory.CreateDirectory(dir);
     return dir;
 }
@@ -153,6 +169,7 @@ sealed class Options
     public int MaxSteps { get; set; } = 6;
     public bool Demo { get; set; }
     public bool Claude { get; set; }
+    public bool Codex { get; set; }
     public string? ProjectPath { get; set; }
     // 백엔드별 기본값이 달라 nullable(ApiBackend→claude-opus-5, ClaudeCodeBackend→sonnet).
     public string? Model { get; set; } = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL");

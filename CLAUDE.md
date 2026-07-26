@@ -52,8 +52,9 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
 ## 지금 상태
 - **Phase 1 구현 완료 + 첫 마일스톤 달성.** `Orchestrator/` 콘솔에 루프 5단계 골격이 있고, `--demo` 로
   자가수리 컴파일 통과(2스텝)를 실측 검증했다. `dotnet build` 경고 0/오류 0.
-  - 백엔드: `ApiBackend`(Anthropic HttpClient 직통), `ScriptedBackend`(--demo, 키 없이 루프 증명).
-  - 타깃: `UnityEditorTarget` — `unity command recompile`/`recompile_status` 로 적용·컴파일검증.
+  - 백엔드 4종: `ClaudeCodeBackend`(`claude -p`, 키 없음)·`CodexBackend`(`codex exec`, 키 없음)·`ApiBackend`(Anthropic HttpClient 직통)·`ScriptedBackend`(--demo). 서로 다른 두 CLI 에이전트가 같은 루프를 돌아 **agent-agnostic 실증**(Phase 2 일부).
+  - 타깃: `UnityEditorTarget` — `unity command recompile`/`recompile_status` 로 적용·컴파일검증. 루프 전 `IsConnectedAsync` preflight(서버 미연결 시 즉시 실패).
+  - 주의: 루프 실행엔 GameDev-AgentLoop 에디터가 **떠 있어야** 함(`서버 연결 가능: true`). 닫히면 recompile 타임아웃.
 - **도구 설치됨:** Unity CLI(`%LOCALAPPDATA%\Unity\bin\unity.exe`, beta 1.0.0-beta.3) + `com.unity.pipeline 0.4.0-exp.1`(서버 포트 7800). .NET 10 SDK.
   - 루프 실행 전제: 이 프로젝트를 에디터에서 열어 pipeline 서버를 띄운다(`unity pipeline list` → `서버 연결 가능: true`).
   - `unity auth login` 불필요(로컬 동작). `ANTHROPIC_API_KEY` 는 환경변수로만, 실제 모델 실행 시 필요.

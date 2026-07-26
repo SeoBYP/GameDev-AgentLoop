@@ -37,6 +37,9 @@ dotnet run --project Orchestrator -- --demo
 ```
 
 ## 상태
-**Phase 1 구현 + 첫 마일스톤 달성** — 루프 5단계 골격(`ApiBackend`/`ScriptedBackend` + `UnityEditorTarget`)
-완성, `--demo` 로 **2스텝 만에 자가수리 컴파일 통과** 실측 확인.
-다음: Phase 2(`ClaudeCodeBackend`/`CodexBackend`, 플레이모드 검증).
+**Phase 1 + Phase 2(일부) — agent-agnostic 실증.** 루프 5단계 골격 완성, 백엔드 4종
+(`ClaudeCodeBackend`·`CodexBackend`·`ApiBackend`·`ScriptedBackend`)이 같은 계약으로 꽂힌다.
+- `--demo` 자가수리 2스텝 통과 · `--claude`(Claude Code, 키 없음) 1스텝 통과 · `--codex`(Codex, 키 없음) 1스텝 통과
+- 서로 다른 두 CLI 에이전트가 **루프 코드 변경 0**으로 동작 → agent-agnostic 입증.
+
+다음: 플레이모드 검증(`eval` 기반 런타임 assert).

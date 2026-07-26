@@ -95,7 +95,7 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 | Phase | 내용 | 산출물 |
 |---|---|---|
 | **1** ✅ | 로컬 순수 루프 골격 (`ApiBackend` + `UnityEditorTarget`) | 자가수리로 컴파일 통과하는 루프 — **달성**(§6.5) |
-| **2** | CLI 백엔드(ClaudeCode/Codex) + 플레이모드 검증 | agent-agnostic 증명 데모 |
+| **2** 🚧 | CLI 백엔드(ClaudeCode/Codex ✅) + 플레이모드 검증 | agent-agnostic **CLI 두 축 달성**(Claude Code·Codex), 플레이모드 남음 |
 | **3** | 도메인 Skills(최적화·아키텍처·함정) | 산출 코드 "품질" 대조 데모 |
 | **4** | `UgsTarget`(Cloud Code 배포·검증) | 클라+백엔드 풀스택 |
 

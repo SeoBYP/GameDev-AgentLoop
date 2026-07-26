@@ -23,10 +23,12 @@
 
 | 축 | 인터페이스 | 지금 | 나중 |
 |---|---|---|---|
-| 두뇌 | `IAgentBackend` | `ClaudeCodeBackend`(**이 AI, 키 없음**) · `ApiBackend`(API 키) · `ScriptedBackend`(데모) | `CodexBackend` |
+| 두뇌 | `IAgentBackend` | `ClaudeCodeBackend`(이 AI, 키 없음) · `CodexBackend`(Codex, 키 없음) · `ApiBackend`(API 키) · `ScriptedBackend`(데모) | — |
 | 손 | `IExecTarget` | `UnityEditorTarget`(`unity` CLI) | `UgsTarget`(`ugs` CLI) |
 
-세 백엔드가 **같은 `IAgentBackend` 계약**으로 루프에 동등하게 꽂힌다 — "백엔드는 텍스트 생성기, 루프는 우리 것"(D1)의 증거.
+네 백엔드가 **같은 `IAgentBackend` 계약**으로 루프에 동등하게 꽂힌다. 특히 서로 다른 두 CLI 에이전트
+(**Claude Code · Codex**)가 루프 코드 변경 0으로 같은 루프를 도는 것으로 **agent-agnostic** 을 실증했다
+— "백엔드는 텍스트 생성기, 루프가 결과물"(D1/D3)의 증거.
 
 ---
 
@@ -35,16 +37,18 @@
 > **공통 전제:** GameDev-AgentLoop 를 Unity 에디터에서 열어 `com.unity.pipeline` 서버를 띄운다.
 > 확인: `unity pipeline list` → `서버 연결 가능: true`.
 
-### 1) 이 AI(Claude Code)로 — 키 없이 (`--claude`)
+### 1) CLI 에이전트로 — 키 없이 (`--claude` / `--codex`)
 
-별도 API 키 없이, **이미 로그인한 Claude Code CLI 를 두뇌로** 루프를 돌린다.
+별도 API 키 없이, **이미 로그인한 CLI 에이전트를 두뇌로** 루프를 돌린다.
 
 ```bash
-dotnet run --project Orchestrator -- --claude "간단한 HP 컴포넌트를 만들어줘"
+dotnet run --project Orchestrator -- --claude "간단한 HP 컴포넌트를 만들어줘"           # Claude Code (기본 sonnet)
+dotnet run --project Orchestrator -- --codex --model gpt-5.5 "오브젝트 풀을 만들어줘"    # Codex
 ```
 
-전제: `claude` CLI 가 PATH 에 있고 **로그인**돼 있어야 한다. 만료 시 `claude -p` 가 401 을 내므로
-`claude` 를 한 번 실행해 재로그인한다. 모델은 기본 `sonnet`(`--model opus` 등으로 변경).
+전제: 해당 CLI(`claude` / `codex`)가 PATH 에 있고 **로그인**돼 있어야 한다(만료 시 각 CLI 로 재로그인).
+`--claude` 기본 모델은 `sonnet`. `--codex` 는 계정이 지원하는 모델을 `--model` 로 지정한다
+(codex 설정 기본 모델이 CLI 버전보다 최신이면 지정 필요).
 
 ### 2) API 키로 — `ApiBackend`
 
@@ -75,6 +79,14 @@ dotnet run --project Orchestrator -- --demo
 
 로그인 → 스모크 테스트(`OK`) → `--claude` 실행. 실제 AI가 생성한 `Health.cs` 를 루프가 Unity에 적용·리컴파일해
 **1스텝 만에 컴파일 통과** — 별도 API 키 없이 동작한다. (생성된 코드는 클램프·이벤트까지 갖춘 실물: [../Assets/Scripts/Health.cs](../Assets/Scripts/Health.cs))
+
+### agent-agnostic — Codex 도 같은 루프로
+
+`--codex`(gpt-5.4-mini)로 **오브젝트 풀**을 생성 → 같은 루프가 적용·검증 → **1스텝 통과**.
+서로 다른 두 CLI 에이전트가 **루프 코드 변경 0**으로 동작한다(백엔드 교체 가능성의 실증):
+
+- Claude Code → [../Assets/Scripts/Health.cs](../Assets/Scripts/Health.cs)
+- Codex → [../Assets/Scripts/ObjectPool.cs](../Assets/Scripts/ObjectPool.cs)
 
 ### 배관 증명 — `--demo`
 
