@@ -23,6 +23,22 @@ public static partial class EditParser
         RegexOptions.Singleline)]
     private static partial Regex FileBlockRegex();
 
+    // ASSERT: 다음 줄에 오는 펜스 코드블록 = 플레이모드 런타임 검증 스니펫.
+    [GeneratedRegex(
+        @"ASSERT:[ \t]*\r?\n```[^\r\n]*\r?\n(?<body>.*?)\r?\n```",
+        RegexOptions.Singleline)]
+    private static partial Regex AssertBlockRegex();
+
+    /// <summary>응답에서 ASSERT 블록(런타임 검증 스니펫)을 뽑는다. 없으면 null.</summary>
+    public static string? ParseAssert(string text)
+    {
+        var m = AssertBlockRegex().Match(text);
+        if (!m.Success)
+            return null;
+        var body = m.Groups["body"].Value.Trim();
+        return body.Length == 0 ? null : body;
+    }
+
     public static IReadOnlyList<FileEdit> Parse(string text)
     {
         var edits = new List<FileEdit>();

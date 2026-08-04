@@ -94,6 +94,44 @@
   → 재실행으로 복구. + **`UnityEditorTarget.IsConnectedAsync` preflight** 추가:
   루프 시작 전 서버 연결을 확인해, 미연결이면 **AI 호출 전에 즉시 실패**(비용/시간 낭비 방지).
 
+---
+
+## 2026-08 · Phase 2 (완료) — 플레이모드 런타임 검증
+
+### 목표
+"컴파일 통과"를 넘어 **"의도대로 동작하는가"** 까지 검증한다. 이게 프로젝트의 존재 이유(D4).
+
+### 한 일
+- `VerifyKind.PlayModeAssert` + `VerifySpec(Kind, AssertCode)` 추가.
+- `UnityEditorTarget`: `editor_status`(준비 대기) → `editor_play` → `eval`(assert) → `editor_stop`(finally).
+- 출력 계약에 **`ASSERT:` 블록** 추가 — 백엔드가 코드와 함께 런타임 검증 스니펫을 낸다
+  (통과 시 `"OK"`, 실패 시 사유 문자열 반환). `EditParser.ParseAssert` 로 파싱.
+- `--assert` 플래그: 사람이 준 기준이 AI 의 ASSERT 보다 **우선**.
+- `--demo-play`: **컴파일은 통과하지만 클램프가 빠진** `Stamina` → 런타임 assert 가 잡아냄 → 수리.
+
+### 실측 결과
+- `--demo-play`: step1 컴파일 통과 ✅ + 런타임 실패 ❌ (`Use(500) 후 Current 는 0 이어야 하는데 -400`)
+  → step2 수리 → **2스텝 만에 컴파일 + 런타임 통과**.
+- `--claude`(실제 AI): 쿨다운 타이머를 생성하며 **스스로 ASSERT 블록을 작성**,
+  루프가 플레이모드에서 실행해 **1스텝 통과** ([../Assets/Scripts/CooldownTimer.cs](../Assets/Scripts/CooldownTimer.cs)).
+- `--assert`(사람 지정): 로그에 "사람 지정"으로 표시되며 AI 기준을 덮어쓰고 클램프 버그를 잡아냄.
+
+### 발견 / 함정 (실측으로 잡음)
+1. **에디트 모드에선 `Awake` 가 안 돈다** → `AddComponent<T>()` 만으론 초기화가 안 됨.
+   진짜 `editor_play` 진입이 있어야 실제 런타임 상태를 검증할 수 있다.
+2. **리컴파일 직후엔 플레이모드 진입이 조용히 거부된다**(도메인 리로드 중).
+   처음엔 이게 `<플레이모드 진입 실패>` 로 나면서 **인프라 실패를 AI 에게 "네 코드가 틀렸다"고 피드백**하는
+   버그가 있었다(실제 `--claude` 실행에서 멀쩡한 코드를 한 스텝 낭비하며 재생성함).
+   → `editor_status` 의 `status:"ready"`/`compiling`/`domainReloadInProgress` 게이팅 + 1회 재시도,
+   그래도 실패하면 **피드백하지 않고 인프라 오류로 중단**하도록 고쳤다. 이후 재실행에서 1스텝 통과 확인.
+3. PowerShell 로 eval 스니펫을 직접 넘기면 내부 큰따옴표가 사라진다(수동 프로브 한정).
+   오케스트레이터는 `ProcessRunner` 가 `ArgumentList` 를 쓰므로 영향 없음.
+
+### 정직한 한계
+기본 경로에서는 **AI 가 자기 코드의 채점 기준(ASSERT)도 스스로 낸다.** 느슨한 기준을 낼 유인이 있다.
+완화책: 피드백에 "assert 말고 구현을 고쳐라" 명시 + `--assert` 사람 주입 경로.
+근본 해결(기준을 생성자와 분리)은 Phase 3 의 몫.
+
 ### 남은 것 / 다음
-- 플레이모드 검증: `UnityEditorTarget.EvalAsync` 로 런타임 assert
-  (예: `AddComponent<Health>().TakeDamage(30)` 후 `Current==70` 확인) → `VerifyKind.PlayModeAssert`.
+- Phase 3: 도메인 Skills(성능·아키텍처·Unity 함정) — 산출물 "품질"을 강제.
+- 검증 확장: 시나리오 재생(다중 프레임), `run_tests`(테스트 러너), `get_performance_stats`(성능 예산).

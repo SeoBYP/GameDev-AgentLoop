@@ -32,14 +32,20 @@ dotnet run --project Orchestrator -- --claude "간단한 HP 컴포넌트를 만�
 # Anthropic API 키로 (키는 환경변수로만; 레포 커밋 금지)
 dotnet run --project Orchestrator -- "간단한 HP 컴포넌트를 만들어줘"
 
-# 키 없이 루프 배관 증명 (일부러 깨진 Health.cs → 컴파일 에러 → 수리 → 통과)
-dotnet run --project Orchestrator -- --demo
+# 키 없이 루프 증명
+dotnet run --project Orchestrator -- --demo        # 컴파일 자가수리 (깨진 코드 → 에러 → 수리)
+dotnet run --project Orchestrator -- --demo-play   # 런타임 검증 (컴파일은 통과하나 동작이 틀린 코드)
 ```
 
 ## 상태
-**Phase 1 + Phase 2(일부) — agent-agnostic 실증.** 루프 5단계 골격 완성, 백엔드 4종
-(`ClaudeCodeBackend`·`CodexBackend`·`ApiBackend`·`ScriptedBackend`)이 같은 계약으로 꽂힌다.
-- `--demo` 자가수리 2스텝 통과 · `--claude`(Claude Code, 키 없음) 1스텝 통과 · `--codex`(Codex, 키 없음) 1스텝 통과
-- 서로 다른 두 CLI 에이전트가 **루프 코드 변경 0**으로 동작 → agent-agnostic 입증.
+**Phase 1 + Phase 2 완료 — agent-agnostic + 런타임 동작 검증.**
+루프 5단계 골격 완성, 백엔드 4종(`ClaudeCodeBackend`·`CodexBackend`·`ApiBackend`·`ScriptedBackend`)이
+같은 계약으로 꽂힌다.
 
-다음: 플레이모드 검증(`eval` 기반 런타임 assert).
+- **검증 2단계**: ③-a 컴파일(`recompile_status`) + ③-b **플레이모드 런타임 assert**(`editor_play`→`eval`).
+- **"컴파일 통과 ≠ 동작 정상" 실증** — `--demo-play`: 컴파일은 멀쩡히 통과하지만 클램프가 빠진 코드를
+  런타임 assert 가 잡아내고(`Use(500) 후 Current 는 0 이어야 하는데 -400`) 2스텝 만에 수리.
+- **agent-agnostic** — Claude Code · Codex 두 CLI 에이전트가 **루프 코드 변경 0**으로 같은 루프를 돈다.
+- 실제 AI 는 코드와 함께 **런타임 검증 스니펫(ASSERT)까지 스스로 작성**하고, 루프가 그걸 플레이모드에서 실행한다.
+
+다음: Phase 3 — 도메인 Skills(성능·아키텍처·Unity 함정)로 산출물 "품질" 강제.

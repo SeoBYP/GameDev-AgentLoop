@@ -95,7 +95,7 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 | Phase | 내용 | 산출물 |
 |---|---|---|
 | **1** ✅ | 로컬 순수 루프 골격 (`ApiBackend` + `UnityEditorTarget`) | 자가수리로 컴파일 통과하는 루프 — **달성**(§6.5) |
-| **2** 🚧 | CLI 백엔드(ClaudeCode/Codex ✅) + 플레이모드 검증 | agent-agnostic **CLI 두 축 달성**(Claude Code·Codex), 플레이모드 남음 |
+| **2** ✅ | CLI 백엔드(ClaudeCode/Codex) + 플레이모드 검증 | agent-agnostic 실증 + **런타임 동작 검증** — 달성(§6.5) |
 | **3** | 도메인 Skills(최적화·아키텍처·함정) | 산출 코드 "품질" 대조 데모 |
 | **4** | `UgsTarget`(Cloud Code 배포·검증) | 클라+백엔드 풀스택 |
 
@@ -123,7 +123,34 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 
 **결정된 열린 질문(§7)**
 - 편집 형식 → **전체 파일 덮어쓰기**(diff 아님)로 확정. `FileEdit(RelativePath, Content)`.
-- 검증 범위 → Phase 1 은 **컴파일만**. 런타임 assert 는 `eval` 훅으로 Phase 2.
+- 검증 범위 → 컴파일 + **플레이모드 런타임 assert** 까지 구현(§6.6). 시나리오 재생은 이후.
+
+---
+
+## 6.6 플레이모드 런타임 검증 (Phase 2 — 달성)
+
+"컴파일 통과"는 성공 기준으로 약하다. 그럴듯하지만 **안 도는** 코드가 통과하기 때문이다.
+그래서 검증을 두 단계로 나눴다:
+
+| 단계 | 무엇을 보나 | 어떻게 |
+|---|---|---|
+| ③-a 컴파일 | 빌드되나 | `recompile` → `recompile_status` 폴링 |
+| ③-b 런타임 | **의도대로 동작하나** | `editor_play` → `eval` 로 assert 실행 → `editor_stop` |
+
+**검증 기준의 출처.** 백엔드가 출력 계약에 따라 `ASSERT:` 블록(플레이모드에서 실행되는 C# 스니펫,
+통과 시 `"OK"` / 실패 시 사유 문자열 반환)을 함께 낸다. 사람이 `--assert` 로 주면 그쪽이 우선한다.
+→ 한계 인정: 기본값은 **생성자가 채점자를 겸한다.** 느슨한 기준을 낼 유인이 있으므로,
+피드백에 "assert 말고 구현을 고쳐라"를 명시하고, 사람 주입 경로를 열어 뒀다.
+기준을 생성자와 완전히 분리하는 건 Phase 3(도메인 Skills·스펙)의 몫.
+
+**실측으로 확인한 함정 두 가지 (코드에 반영)**
+1. 에디트 모드에선 `Awake` 가 돌지 않는다 → 진짜 플레이모드 진입이 필요.
+2. 리컴파일 직후엔 도메인 리로드 때문에 진입이 조용히 거부된다 →
+   `editor_status` 의 `status:"ready"`/`compiling`/`domainReloadInProgress` 로 게이팅 후 진입, 1회 재시도.
+   그래도 실패하면 **모델에 피드백하지 않고** 인프라 오류로 중단한다
+   (인프라 실패를 "코드가 틀렸다"로 되돌리면 멀쩡한 코드를 고치며 스텝을 낭비한다).
+
+에디터는 `finally` 에서 반드시 `editor_stop` — 검증이 실패해도 플레이모드에 남지 않는다.
 
 ---
 

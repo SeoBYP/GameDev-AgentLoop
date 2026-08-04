@@ -34,6 +34,10 @@ if (opts.Demo)
 {
     backend = new ScriptedBackend(DemoScript.BrokenThenFixedHealth);
 }
+else if (opts.DemoPlay)
+{
+    backend = new ScriptedBackend(DemoScript.CompilesButWrongStamina);
+}
 else if (opts.Claude)
 {
     // "이 AI 채팅"(Claude Code CLI)을 두뇌로 — 별도 API 키 불필요(CLI 로그인만).
@@ -55,7 +59,8 @@ else
               • 이 AI(Claude Code)로:    orchestrator --claude "목표"   ← claude CLI 로그인 필요
               • Codex 로:                orchestrator --codex  "목표"   ← codex  CLI 로그인 필요
               • Anthropic API 키로:      환경변수 ANTHROPIC_API_KEY 설정 후  orchestrator "목표"
-              • 키 없이 루프 배관 증명:  orchestrator --demo
+              • 키 없이 루프 배관 증명:  orchestrator --demo        (컴파일 자가수리)
+              • 키 없이 런타임 검증 증명: orchestrator --demo-play   (컴파일은 통과하나 동작이 틀린 코드)
             (키는 절대 레포에 커밋하지 마세요 — CLAUDE.md)
             """);
         return 2;
@@ -76,7 +81,11 @@ if (!await target.IsConnectedAsync(cts.Token))
     return 2;
 }
 
-var loop = new AgentLoop(backend, target, new LoopOptions { MaxSteps = opts.MaxSteps });
+var loop = new AgentLoop(backend, target, new LoopOptions
+{
+    MaxSteps = opts.MaxSteps,
+    Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
+});
 
 try
 {
@@ -112,8 +121,10 @@ static Options ParseArgs(string[] args)
         switch (args[i])
         {
             case "--demo": o.Demo = true; break;
+            case "--demo-play": o.DemoPlay = true; break;
             case "--claude": o.Claude = true; break;
             case "--codex": o.Codex = true; break;
+            case "--assert" when i + 1 < args.Length: o.Assert = args[++i]; break;
             case "--max-steps" when i + 1 < args.Length: o.MaxSteps = int.Parse(args[++i]); break;
             case "--project" when i + 1 < args.Length: o.ProjectPath = args[++i]; break;
             case "--model" when i + 1 < args.Length: o.Model = args[++i]; break;
@@ -168,8 +179,10 @@ sealed class Options
         "간단한 Health(HP) 컴포넌트를 만들어줘. 현재/최대 체력, TakeDamage(int), Heal(int)을 갖고, 체력은 0 미만·최대치 초과가 되지 않아야 한다.";
     public int MaxSteps { get; set; } = 6;
     public bool Demo { get; set; }
+    public bool DemoPlay { get; set; }
     public bool Claude { get; set; }
     public bool Codex { get; set; }
+    public string? Assert { get; set; }
     public string? ProjectPath { get; set; }
     // 백엔드별 기본값이 달라 nullable(ApiBackend→claude-opus-5, ClaudeCodeBackend→sonnet).
     public string? Model { get; set; } = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL");
@@ -212,6 +225,77 @@ static class DemoScript
             public void TakeDamage(int amount) => Current = Mathf.Max(0, Current - amount);
             public void Heal(int amount)       => Current = Mathf.Min(Max, Current + amount);
         }
+        ```
+        """,
+    };
+
+    // --demo-play 스크립트: **컴파일은 통과하지만 동작이 틀린** 코드를 런타임 assert 가 잡아낸다.
+    // step 1) 클램프 없는 Stamina → 컴파일 OK, 하지만 Use(500) 시 Current 가 음수가 된다.
+    // step 2) (assert 실패 피드백 후) Mathf.Max/Min 클램프 추가 → 런타임 통과.
+    // "컴파일 통과 ≠ 동작 정상" 을 보여주는 시나리오 — 이 프로젝트의 차별점(D4)의 핵심 증거.
+    public static readonly IReadOnlyList<string> CompilesButWrongStamina = new[]
+    {
+        // step 1 — 컴파일은 되지만 클램프가 빠졌다.
+        """
+        FILE: Assets/Scripts/Stamina.cs
+        ```csharp
+        using UnityEngine;
+
+        public class Stamina : MonoBehaviour
+        {
+            public int Max = 100;
+            public int Current;
+
+            private void Awake() => Current = Max;
+
+            public void Use(int amount)     => Current -= amount;
+            public void Recover(int amount) => Current += amount;
+        }
+        ```
+        ASSERT:
+        ```csharp
+        var go = new UnityEngine.GameObject();
+        var s = go.AddComponent<Stamina>();
+        s.Use(500);
+        int afterUse = s.Current;
+        s.Recover(9999);
+        int afterRecover = s.Current;
+        UnityEngine.Object.DestroyImmediate(go);
+        if (afterUse != 0) return "Use(500) 후 Current 는 0 이어야 하는데 " + afterUse + " 였습니다.";
+        if (afterRecover != 100) return "Recover(9999) 후 Current 는 Max(100) 이어야 하는데 " + afterRecover + " 였습니다.";
+        return "OK";
+        ```
+        """,
+
+        // step 2 — 클램프 추가로 수정(검증 기준은 그대로).
+        """
+        FILE: Assets/Scripts/Stamina.cs
+        ```csharp
+        using UnityEngine;
+
+        public class Stamina : MonoBehaviour
+        {
+            public int Max = 100;
+            public int Current;
+
+            private void Awake() => Current = Max;
+
+            public void Use(int amount)     => Current = Mathf.Max(0, Current - amount);
+            public void Recover(int amount) => Current = Mathf.Min(Max, Current + amount);
+        }
+        ```
+        ASSERT:
+        ```csharp
+        var go = new UnityEngine.GameObject();
+        var s = go.AddComponent<Stamina>();
+        s.Use(500);
+        int afterUse = s.Current;
+        s.Recover(9999);
+        int afterRecover = s.Current;
+        UnityEngine.Object.DestroyImmediate(go);
+        if (afterUse != 0) return "Use(500) 후 Current 는 0 이어야 하는데 " + afterUse + " 였습니다.";
+        if (afterRecover != 100) return "Recover(9999) 후 Current 는 Max(100) 이어야 하는데 " + afterRecover + " 였습니다.";
+        return "OK";
         ```
         """,
     };

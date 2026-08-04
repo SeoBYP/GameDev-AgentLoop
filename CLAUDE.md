@@ -50,13 +50,17 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
 - 비밀(API 키)은 절대 커밋 금지. `unity`/`ugs` CLI 인증도 레포 밖.
 
 ## 지금 상태
-- **Phase 1 구현 완료 + 첫 마일스톤 달성.** `Orchestrator/` 콘솔에 루프 5단계 골격이 있고, `--demo` 로
-  자가수리 컴파일 통과(2스텝)를 실측 검증했다. `dotnet build` 경고 0/오류 0.
-  - 백엔드 4종: `ClaudeCodeBackend`(`claude -p`, 키 없음)·`CodexBackend`(`codex exec`, 키 없음)·`ApiBackend`(Anthropic HttpClient 직통)·`ScriptedBackend`(--demo). 서로 다른 두 CLI 에이전트가 같은 루프를 돌아 **agent-agnostic 실증**(Phase 2 일부).
-  - 타깃: `UnityEditorTarget` — `unity command recompile`/`recompile_status` 로 적용·컴파일검증. 루프 전 `IsConnectedAsync` preflight(서버 미연결 시 즉시 실패).
+- **Phase 1 + Phase 2 완료.** `Orchestrator/` 콘솔에 루프 5단계 골격이 있고, 컴파일 자가수리와
+  **플레이모드 런타임 검증**을 모두 실측했다. `dotnet build` 경고 0/오류 0.
+  - 백엔드 4종: `ClaudeCodeBackend`(`claude -p`, 키 없음)·`CodexBackend`(`codex exec`, 키 없음)·`ApiBackend`(Anthropic HttpClient 직통)·`ScriptedBackend`(--demo). 서로 다른 두 CLI 에이전트가 같은 루프를 돌아 **agent-agnostic 실증**.
+  - 타깃: `UnityEditorTarget` — 검증 2단계. ③-a 컴파일(`recompile`/`recompile_status`) + ③-b **플레이모드 런타임 assert**(`editor_status` ready 대기 → `editor_play` → `eval` → `finally` `editor_stop`). 루프 전 `IsConnectedAsync` preflight.
+  - 출력 계약: `FILE:` 블록(전체 파일) + `ASSERT:` 블록(플레이모드 검증 스니펫, `"OK"`/실패사유 반환). `--assert` 로 사람이 기준 주입 시 우선.
+  - 데모: `--demo`(컴파일 자가수리 2스텝) · `--demo-play`(컴파일 통과하나 동작 틀린 코드 → 런타임 assert 가 잡아냄).
   - 주의: 루프 실행엔 GameDev-AgentLoop 에디터가 **떠 있어야** 함(`서버 연결 가능: true`). 닫히면 recompile 타임아웃.
+  - 함정(해결됨): 에디트 모드는 `Awake` 안 돎 → 진짜 플레이모드 필요. 리컴파일 직후엔 도메인 리로드로 진입 거부 → ready 게이팅 + 재시도, 인프라 실패는 모델에 피드백하지 않음.
 - **도구 설치됨:** Unity CLI(`%LOCALAPPDATA%\Unity\bin\unity.exe`, beta 1.0.0-beta.3) + `com.unity.pipeline 0.4.0-exp.1`(서버 포트 7800). .NET 10 SDK.
   - 루프 실행 전제: 이 프로젝트를 에디터에서 열어 pipeline 서버를 띄운다(`unity pipeline list` → `서버 연결 가능: true`).
   - `unity auth login` 불필요(로컬 동작). `ANTHROPIC_API_KEY` 는 환경변수로만, 실제 모델 실행 시 필요.
-- 다음: Phase 2(`ClaudeCodeBackend`/`CodexBackend` headless, `eval` 기반 플레이모드 assert).
+- **Phase 2 완료** — agent-agnostic(두 CLI 에이전트) + 플레이모드 런타임 검증.
+- 다음: Phase 3(도메인 Skills — 성능·아키텍처·Unity 함정으로 산출물 품질 강제).
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

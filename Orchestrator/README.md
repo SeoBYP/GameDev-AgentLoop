@@ -12,12 +12,18 @@
 
 ```
 목표(자연어)
- → ① 생성   IAgentBackend.CompleteAsync   (텍스트/파일편집 out)
+ → ① 생성   IAgentBackend.CompleteAsync   (파일편집 + 런타임 ASSERT 스니펫 out)
  → ② 적용   IExecTarget.ApplyAsync        (Assets/ 파일쓰기 + `recompile` 트리거)
- → ③ 검증   IExecTarget.VerifyAsync       (`recompile_status` 폴링 → 컴파일 에러?)
- → ④ 피드백  에러를 대화(History)에 추가해 백엔드로 되돌림
- → ⑤ 판정   통과 → 종료 / 실패 → ①로  (maxSteps 가드, 기본 6)
+ → ③ 검증   IExecTarget.VerifyAsync
+       ③-a  컴파일       `recompile_status` 폴링 → 컴파일 에러?
+       ③-b  런타임 동작   `editor_play` → `eval` 로 assert 실행 → `editor_stop`
+ → ④ 피드백  에러/실패 사유를 대화(History)에 추가해 백엔드로 되돌림
+ → ⑤ 판정   둘 다 통과 → 종료 / 실패 → ①로  (maxSteps 가드, 기본 6)
 ```
+
+**③-b 가 이 프로젝트의 차별점이다.** 컴파일만 보면 "그럴듯하지만 안 도는 코드"를 통과시킨다.
+플레이모드에서 실제로 실행해 보고(`Awake` 까지 도는 진짜 런타임) 의도대로 동작하는지 확인해야
+비로소 *"검증된 결과"* 가 된다(D4).
 
 두 축이 **pluggable** 이다:
 
@@ -58,16 +64,26 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."      # PowerShell
 dotnet run --project Orchestrator -- "간단한 HP 컴포넌트를 만들어줘"
 ```
 
-### 3) 키 없이 배관 증명 — `--demo`
+### 3) 키 없이 배관 증명 — `--demo` / `--demo-play`
 
-스크립트 백엔드로 **자가수리 루프의 배관**을 결정적으로 보여준다
-(일부러 세미콜론 빠진 `Health.cs` → 컴파일 에러 → 고친 `Health.cs` → 통과).
+스크립트 백엔드로 루프를 결정적으로 보여준다(키 불필요).
 
 ```bash
-dotnet run --project Orchestrator -- --demo
+dotnet run --project Orchestrator -- --demo        # 컴파일 자가수리: 세미콜론 누락 → 에러 → 수리 → 통과
+dotnet run --project Orchestrator -- --demo-play   # 런타임 검증: 컴파일은 통과하나 동작이 틀린 코드 → 수리
 ```
 
-공통 옵션: `--max-steps N` · `--project <UnityProjectPath>` · `--model <id>`.
+### 검증 기준을 사람이 지정 — `--assert`
+
+AI 가 낸 `ASSERT` 블록 대신 **사람이 준 기준**으로 채점한다(AI 가 자기 코드를 자기 기준으로
+느슨하게 채점하는 것을 막는 장치). 플레이모드에서 실행되는 C# 스니펫을 그대로 넘긴다:
+
+```bash
+dotnet run --project Orchestrator -- --claude "스태미나 컴포넌트" \
+  --assert 'var go = new UnityEngine.GameObject(); var s = go.AddComponent<Stamina>(); s.Use(500); int c = s.Current; UnityEngine.Object.DestroyImmediate(go); return c == 0;'
+```
+
+공통 옵션: `--max-steps N` · `--project <UnityProjectPath>` · `--model <id>` · `--assert <C#>`.
 
 ---
 
@@ -79,6 +95,34 @@ dotnet run --project Orchestrator -- --demo
 
 로그인 → 스모크 테스트(`OK`) → `--claude` 실행. 실제 AI가 생성한 `Health.cs` 를 루프가 Unity에 적용·리컴파일해
 **1스텝 만에 컴파일 통과** — 별도 API 키 없이 동작한다. (생성된 코드는 클램프·이벤트까지 갖춘 실물: [../Assets/Scripts/Health.cs](../Assets/Scripts/Health.cs))
+
+### 런타임 검증 — "컴파일 통과 ≠ 동작 정상" (`--demo-play`)
+
+이 프로젝트의 존재 이유를 가장 잘 보여주는 실행이다. **컴파일은 멀쩡히 통과하지만 클램프가 빠진**
+스태미나 컴포넌트를, 플레이모드 런타임 assert 가 잡아내고 수리한다:
+
+```
+──────── step 1/6 ────────
+① 생성  → 파일 편집 1개
+② 적용  → 1개 파일 적용 + 리컴파일 트리거: Assets/Scripts/Stamina.cs
+③ 검증  → 컴파일 통과 ✅                      ← 여기서 멈추면 "성공"으로 보인다
+③ 검증  → 플레이모드 진입, 런타임 assert 실행 (AI 생성)
+③ 검증  → 플레이모드 assert 실패 ❌
+      · Use(500) 후 Current 는 0 이어야 하는데 -400 였습니다.   ← 실제 런타임 관측값
+
+──────── step 2/6 ────────
+① 생성  → 파일 편집 1개
+② 적용  → 1개 파일 적용 + 리컴파일 트리거: Assets/Scripts/Stamina.cs
+③ 검증  → 컴파일 통과 ✅
+③ 검증  → 플레이모드 진입, 런타임 assert 실행 (AI 생성)
+③ 검증  → 플레이모드 assert 통과 ✅
+
+✅ 성공 — 2스텝 만에 컴파일 + 런타임 동작 검증 통과
+```
+
+실제 AI 백엔드로도 동일하게 동작한다 — `--claude` 로 쿨다운 타이머를 생성하면, 모델이 **스스로
+ASSERT 블록을 작성**하고 루프가 그걸 플레이모드에서 실행해 검증한다
+(산출물 [../Assets/Scripts/CooldownTimer.cs](../Assets/Scripts/CooldownTimer.cs)).
 
 ### agent-agnostic — Codex 도 같은 루프로
 
@@ -124,16 +168,19 @@ Orchestrator/
 │  ├─ IExecTarget.cs          손 계약: 적용 + 검증
 │  └─ LoopModels.cs           Turn/AgentContext/FileEdit/AgentReply/VerifyResult ...
 ├─ Backends/              ── IAgentBackend 구현들
+│  ├─ ClaudeCodeBackend.cs    `claude -p` headless (키 없음) — 이 AI 를 두뇌로
+│  ├─ CodexBackend.cs         `codex exec` headless (키 없음) — agent-agnostic 증명
 │  ├─ ApiBackend.cs           Anthropic Messages API 직통 (HttpClient, 의존성 0)
-│  └─ ScriptedBackend.cs      미리 정한 응답 재생 → 키 없이 루프 증명(--demo)
+│  └─ ScriptedBackend.cs      미리 정한 응답 재생 → 키 없이 루프 증명(--demo/--demo-play)
 ├─ Targets/              ── IExecTarget 구현들
-│  └─ UnityEditorTarget.cs    `unity command recompile/recompile_status` 로 적용·검증
+│  └─ UnityEditorTarget.cs    적용·컴파일검증 + 플레이모드 런타임 assert
 ├─ Loop/                 ── 루프 그 자체
-│  ├─ AgentLoop.cs            5단계 오케스트레이션 ("루프는 우리 것"의 실체)
-│  └─ LoopOptions.cs          maxSteps 가드 + 결과 타입
+│  ├─ AgentLoop.cs            5단계 오케스트레이션 ("루프는 우리 것"의 실체) + 출력 계약
+│  └─ LoopOptions.cs          maxSteps 가드 · 사람 지정 assert · 결과 타입
 └─ Util/
-   ├─ ProcessRunner.cs        `unity` CLI 실행 + stdout/stderr 캡처
-   └─ EditParser.cs           응답 텍스트 → FileEdit (FILE: + ```csharp 펜스 파싱)
+   ├─ ProcessRunner.cs        외부 CLI 실행 + stdout/stderr 캡처 (+ stdin 전달)
+   ├─ PromptText.cs           AgentContext → headless 한 방 프롬프트 (CLI 백엔드 공용)
+   └─ EditParser.cs           응답 텍스트 → FileEdit(FILE:) + 런타임 assert(ASSERT:) 파싱
 ```
 
 ### 왜 이렇게 나눴나 (설계 결정 → 코드)
@@ -148,7 +195,14 @@ Orchestrator/
 
 - **`UnityEditorTarget` 이 이 프로젝트의 차별점 (D4)** — 대부분의 에이전트 데모가 여기서 멈춘다("코드 생성").
   이 타깃은 `com.unity.pipeline` 이 여는 로컬 서버에 `unity command` 로 붙어, 실행 중인 에디터에서
-  **재컴파일을 시키고 그 결과(에러 목록)를 되받아 온다.** 검증이 있어야 자가수리가 가능하다.
+  **재컴파일을 시키고 그 결과(에러 목록)를 되받아 오고**, 나아가 **플레이모드에 진입해 실제로 실행**한다.
+  검증이 있어야 자가수리가 가능하고, 런타임 검증이 있어야 "컴파일만 되는 코드"를 걸러낼 수 있다.
+
+- **런타임 검증 기준은 누가 정하나 (정직한 한계)** — 기본값은 백엔드가 `ASSERT` 블록으로 스스로 낸다.
+  편하지만 **AI 가 자기 코드를 자기 기준으로 채점**하는 구조라, 기준이 느슨하면 통과가 쉬워진다.
+  그래서 (a) 피드백에 *"assert 를 느슨하게 바꾸지 말고 구현을 고쳐라"* 를 명시하고,
+  (b) 사람이 `--assert` 로 **권위 있는 기준을 주입**하면 AI 의 것을 덮어쓰도록 했다.
+  진짜 해결은 기준을 생성자와 분리하는 것(예: 사람이 쓴 스펙/테스트) — 그건 Phase 3 의 몫이다.
 
 - **`EditParser` 가 백엔드가 아니라 Util 에 있는 이유** — 출력 형식(`FILE:` + 펜스)은 백엔드 무관이다
   (시스템 프롬프트로 강제). 그래서 모든 백엔드가 같은 파서를 재사용한다.
@@ -164,11 +218,21 @@ Orchestrator/
 | 단계 | 명령 | 반환 |
 |---|---|---|
 | ② 적용 | (직접 파일쓰기) + `unity command recompile` | 리컴파일 트리거(비포커스에서도 동작) |
-| ③ 검증 | `unity command recompile_status` 폴링 | `{ status: idle\|compiling\|completed\|up_to_date, failed: bool, errors: [] }` |
-| (Phase 2) | `unity command eval "<C#>"` | Roslyn 즉시 실행 — 플레이모드 assert 훅으로 남겨둠 (`EvalAsync`) |
+| ③-a 컴파일 | `unity command recompile_status` 폴링 | `{ status: idle\|compiling\|completed\|up_to_date, failed: bool, errors: [] }` |
+| ③-b 런타임 | `editor_status` → `editor_play` → `eval "<C#>"` → `editor_stop` | 준비상태 확인 → 진입 → Roslyn 즉시 실행 → 복귀 |
 
 `--json` 봉투: `{ success, command, data: { result, success, ... }, errors, warnings }`.
 `recompile_status` 의 `data.result` 는 JSON **문자열**이라 한 번 더 파싱한다(코드 주석 참고).
+
+**플레이모드 검증의 함정 두 가지** (실측으로 확인하고 코드에 반영):
+1. **에디트 모드에선 `Awake` 가 안 돈다.** `AddComponent<T>()` 만으론 초기화가 안 되므로
+   진짜 `editor_play` 진입이 필요하다. 그래야 `Awake` 가 돌고 실제 런타임 상태를 검증할 수 있다.
+2. **리컴파일 직후엔 진입이 거부된다.** 도메인 리로드 중이면 `editor_play` 가 조용히 무시된다.
+   → `editor_status` 의 `status:"ready"` / `compiling` / `domainReloadInProgress` 를 보고 기다린 뒤 진입하고,
+   실패 시 1회 재시도한다. 그래도 실패하면 **모델에게 피드백하지 않고** 인프라 오류로 중단한다
+   (인프라 문제를 "네 코드가 틀렸다"로 되돌리면 멀쩡한 코드를 고치다 스텝을 낭비한다).
+
+에디터는 검증이 실패하든 취소되든 `finally` 에서 반드시 `editor_stop` 으로 복귀시킨다(부작용 방지).
 
 ---
 
@@ -177,5 +241,5 @@ Orchestrator/
 - **새 백엔드** — `IAgentBackend` 구현 1개 추가 + `Program.cs` 에서 선택 분기.
   `ClaudeCodeBackend` 는 `claude -p`(headless) 를 `ProcessRunner` 로 호출해 1회 응답만 받으면 된다.
 - **새 타깃** — `IExecTarget` 구현 1개 추가. `UgsTarget` 은 `ugs` CLI 로 Cloud Code 배포·호출을 검증.
-- **검증 강화** — `VerifySpec` 에 `PlayModeAssert` 등을 추가하고 `UnityEditorTarget.EvalAsync` 로
-  런타임 상태를 확인(예: `new GameObject().AddComponent<Health>().TakeDamage(30)` 후 `Current==70` assert).
+- **검증 강화(계속)** — 지금은 컴파일 + 플레이모드 assert. 다음은 시나리오 재생
+  (여러 프레임에 걸친 동작), 성능 예산(`get_performance_stats`), 테스트 러너(`run_tests`) 연동 등.
