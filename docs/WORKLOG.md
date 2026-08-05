@@ -181,6 +181,40 @@
 검사는 정규식 + 중괄호 매칭 수준이라 국소 규칙만 잡는다(의존성 0 유지가 목적).
 구문 수준 규칙이 필요해지면 Roslyn 분석기로 승격하면 된다.
 
+---
+
+## 2026-08 · Phase 4 — UgsTarget (두 번째 손)
+
+### 목표
+손을 바꿔 같은 루프로 **백엔드(UGS Cloud Code)** 를 만들고 검증한다 → 두 축 pluggable 완성.
+
+### 한 일
+- **`ugs` CLI 설치** — `npm install -g ugs` (1.9.0). `unity cloud` 는 조직/프로젝트 관리만 하고
+  Cloud Code 는 커버하지 않아 별도 CLI 가 맞았다.
+- **`UgsTarget`** 구현 — Apply=Cloud Code `.js` 파일 쓰기, Verify=`ugs deploy`(배포가 곧 검증).
+- **`IExecTarget` 확장** — 타깃이 자기를 설명하도록:
+  `GenerationBrief`(생성 규격) · `VerifyLabel` · `Supports(kind)` · `IsConnectedAsync`/`ConnectionHint`.
+  시스템 프롬프트가 **[루프 형식] + [손의 규격] + [스킬 지침]** 조립으로 바뀌었다.
+- **스킬 타깃 필터** — front-matter `targets: unity` 추가. UGS 실행 시 Unity 스킬이 딸려가지 않는다.
+- **`--print-prompt`** — 인증 없이도 타깃별 프롬프트 조립 결과를 확인하는 수단.
+- 플래그: `--target unity|ugs` · `--ugs-project-id` · `--ugs-env` · `--cloud-code-dir`.
+
+### 실측 (인증 경계까지)
+- `--target ugs --print-prompt` → Cloud Code JS 규격, ASSERT 없음, 런타임 검증 지원 False ✅
+- `--target ugs --list-skills` → Unity 스킬 3종 모두 **미선택** ✅
+- `--target ugs` 실행 → 미인증 감지 후 **AI 호출 전** 안내 출력하고 종료(exit 2) ✅
+- Unity 데모 3종(`--demo`/`--demo-play`/`--demo-skills`) 회귀 없음 ✅
+
+### 발견 / 정직한 한계
+- **`ugs` CLI 에 스크립트 호출 명령이 없다.** `cloud-code scripts` 는 create/publish/get/list/update/delete 뿐.
+  → `Supports(PlayModeAssert) == false` 로 선언하고 루프가 런타임 단계를 건너뛰게 했다.
+  없는 기능을 있는 척하지 않는다. 호출 검증은 Cloud Code REST + 플레이어 토큰 경로가 필요하다.
+- **실제 배포는 사용자 인증이 필요하다.** 서비스 계정 키는 Unity Cloud 대시보드에서만 발급되고,
+  비밀키는 오케스트레이터가 다루지 않는다(`ugs login` 또는 환경변수로 CLI 가 보관).
+  그래서 "배포 성공" 경로는 아직 미실측이며, 문서에 그대로 적었다.
+- 사용자 클라우드에 실제 배포하는 것은 **외부에 영향을 주는 작업**이라 임의로 하지 않고 확인을 받기로 했다.
+
 ### 남은 것 / 다음
-- Phase 4: `UgsTarget`(UGS Cloud Code 배포·호출 검증) — 클라 + 백엔드 풀스택.
+- 서비스 계정 키 + 프로젝트 지정 후 **실배포 1회 실측** → Phase 4 완료 처리.
+- UGS 호출 검증(Cloud Code REST + 플레이어 토큰) → 백엔드 쪽 "런타임 검증".
 - 검증 확장: 시나리오 재생(다중 프레임), `run_tests`(테스트 러너), `get_performance_stats`(성능 예산).

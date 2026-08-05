@@ -53,4 +53,8 @@ dotnet run --project Orchestrator -- --demo-skills  # 품질 강제 (도메인 �
   같은 목표·모델에서 스킬만 켜면 `public` 필드 → `[SerializeField] private`, 거리 비교 → `sqrMagnitude`,
   프로퍼티 반복 접근 → 지역변수 캐싱으로 산출물이 바뀐다.
 
-다음: Phase 4 — `UgsTarget`(UGS Cloud Code 배포·검증)로 클라 + 백엔드 풀스택.
+- **두 번째 손(Phase 4)** — `UgsTarget` 으로 같은 루프가 **UGS Cloud Code(JS)** 를 만들고 `ugs deploy` 로 배포 검증.
+  손이 바뀌면 언어도 검증 방식도 바뀌므로, 타깃이 자기 생성 규격·가능한 검증을 스스로 선언한다(`--print-prompt`).
+  *실제 배포는 서비스 계정 인증이 필요해 사용자 설정 후 실측 예정.*
+
+다음: UGS 실배포 실측 → 호출 검증(Cloud Code REST) 확장.

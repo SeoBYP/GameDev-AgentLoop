@@ -24,6 +24,7 @@ name: unity-performance      # 필수, 식별자
 title: Unity 성능 — 핫패스 규칙
 always: true                 # true 면 항상 적용
 when: 성능, 최적화            # always 가 아닐 때 목표 문자열과 매칭할 키워드
+targets: unity               # 적용할 타깃(생략하면 모든 타깃). 예: unity | ugs
 ---
 
 ## GUIDANCE

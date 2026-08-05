@@ -47,7 +47,7 @@ public sealed class AgentLoop
             ? $"스킬: {string.Join(", ", _skills.Select(s => s.Name))} ({_skills.Sum(s => s.Checks.Count)}개 검사)"
             : "스킬: 없음 (--skills off)");
 
-        var system = SystemPromptBase + BuildSkillSection();
+        var system = BuildSystemPrompt(_target, _skills);
         var history = new List<Turn> { new(Role.User, BuildInitialPrompt(goal)) };
 
         for (int step = 1; step <= _options.MaxSteps; step++)
@@ -97,7 +97,7 @@ public sealed class AgentLoop
             var verify = await _target.VerifyAsync(new VerifySpec(VerifyKind.Compile), ct);
             if (!verify.Ok)
             {
-                _log($"③ 검증  → 컴파일 에러 {verify.Errors.Count}건 ❌");
+                _log($"③ 검증  → {_target.VerifyLabel} 에러 {verify.Errors.Count}건 ❌");
                 foreach (var e in verify.Errors.Take(5))
                     _log($"      · {e}");
 
@@ -105,15 +105,16 @@ public sealed class AgentLoop
                 history.Add(new Turn(Role.User, BuildErrorFeedback(verify.Errors)));
                 continue;
             }
-            _log("③ 검증  → 컴파일 통과 ✅");
+            _log($"③ 검증  → {_target.VerifyLabel} 통과 ✅");
 
             // ③-b 검증: 플레이모드 런타임 assert (있을 때만)
             // 사람이 준 assert(_options.Assert)가 백엔드가 낸 ASSERT 블록보다 우선한다.
             var assertCode = _options.Assert ?? EditParser.ParseAssert(reply.Text);
-            if (assertCode is null)
+            if (assertCode is null || !_target.Supports(VerifyKind.PlayModeAssert))
             {
-                // ⑤ 판정 — 런타임 기준이 없으면 컴파일 통과까지가 성공 기준.
-                return new LoopResult(true, step, $"{step}스텝 만에 컴파일 통과 (런타임 assert 없음)");
+                // ⑤ 판정 — 런타임 기준이 없거나 타깃이 런타임 검증을 지원하지 않으면 여기까지가 성공 기준.
+                var why = assertCode is null ? "런타임 assert 없음" : "타깃이 런타임 검증 미지원";
+                return new LoopResult(true, step, $"{step}스텝 만에 적용·검증 통과 ({why})");
             }
 
             _log($"③ 검증  → 플레이모드 진입, 런타임 assert 실행 ({(_options.Assert is not null ? "사람 지정" : "AI 생성")})");
@@ -139,46 +140,34 @@ public sealed class AgentLoop
 
     // ── 프롬프트/피드백 (출력 계약을 시스템 프롬프트로 강제 — DESIGN.md §4) ──────────
 
-    private const string SystemPromptBase = """
-        You are a Unity C# code generator running inside an automated build → verify → repair loop.
+    // 루프가 소유하는 건 **형식** 계약뿐이다. 언어·경로·검증 스니펫 같은 **내용 규격**은
+    // 타깃(IExecTarget.GenerationBrief)이 준다 — 손이 바뀌면 만들 것도 바뀌기 때문(D5).
+    private const string FormatContract = """
+        You are a code generator running inside an automated apply → verify → repair loop.
 
         OUTPUT CONTRACT (STRICT):
         - Emit every file exactly as:
-        FILE: <path relative to the Unity project root>
-        ```csharp
+        FILE: <path relative to the project root>
+        ```
         <complete file content>
         ```
-        - Put runtime scripts under Assets/Scripts/.
         - Always output the FULL file content. No diffs, no "// ...", no ellipses, no omissions.
         - Keep any prose to at most one short line; the FILE blocks are what matter.
-
-        - After the FILE blocks, emit EXACTLY ONE runtime check as:
-        ASSERT:
-        ```csharp
-        <C# statements ending in a return>
-        ```
-          The snippet is executed inside the Unity Editor IN PLAY MODE via Roslyn (`unity command eval`).
-          Rules for the snippet:
-            * Return the string "OK" when the behavior is correct; otherwise return a SHORT string
-              explaining what was expected vs. what actually happened.
-            * Exercise the behavior the goal actually asks for, including edge cases
-              (clamping, bounds, invalid input) — not just that the type exists.
-            * It runs in play mode, so Awake/OnEnable DO run. Build objects with
-              `new UnityEngine.GameObject()` + `AddComponent<T>()`, and clean up with
-              `UnityEngine.Object.DestroyImmediate(go)` before returning.
-            * Use fully qualified UnityEngine names. Do not use `using` directives.
-            * No file I/O, no scene loading, no coroutines, no waiting across frames.
-
-        TARGET: Unity 6 (6000.x), C#. Assume UnityEngine is available.
-        When you receive compiler errors OR a failed runtime assert, fix the ROOT CAUSE in the
-        implementation and re-emit the COMPLETE corrected file(s) plus the ASSERT block.
+        - When you receive errors from the verification step, fix the ROOT CAUSE in the
+          implementation and re-emit the COMPLETE corrected file(s).
         """;
 
-    // 선택된 스킬의 지침을 시스템 프롬프트 뒤에 붙인다(스킬이 없으면 빈 문자열).
-    private string BuildSkillSection()
+    /// <summary>
+    /// 시스템 프롬프트 = [루프의 형식 계약] + [타깃의 생성 규격] + [선택된 스킬의 지침].
+    /// 세 조각의 출처가 다르다는 게 설계의 핵심이다 — 형식은 루프, 내용은 손, 품질은 스킬.
+    /// (`--print-prompt` 로 조립 결과를 그대로 볼 수 있다.)
+    /// </summary>
+    public static string BuildSystemPrompt(IExecTarget target, IReadOnlyList<Skill> skills)
     {
-        var guidance = SkillLibrary.BuildGuidance(_skills);
-        return guidance.Length == 0 ? string.Empty : "\n\n" + guidance;
+        var guidance = SkillLibrary.BuildGuidance(skills);
+        return FormatContract
+             + "\n\n" + target.GenerationBrief
+             + (guidance.Length == 0 ? string.Empty : "\n\n" + guidance);
     }
 
     private static string BuildInitialPrompt(string goal) =>

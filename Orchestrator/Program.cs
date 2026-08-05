@@ -29,7 +29,7 @@ if (projectPath is null || !Directory.Exists(Path.Combine(projectPath, "Assets")
 // 1-b) 도메인 스킬 로드 (Phase 3) — 포터블 마크다운이라 모든 백엔드에 동일하게 적용된다.
 var skillsDir = opts.SkillsDir ?? Path.Combine(projectPath, "Skills");
 var library = opts.SkillsOff ? SkillLibrary.Empty : SkillLibrary.Load(skillsDir);
-var selectedSkills = library.Select(opts.Goal);
+var selectedSkills = library.Select(opts.Goal, opts.Target);
 
 if (opts.ListSkills)
 {
@@ -48,8 +48,28 @@ if (opts.ListSkills)
     return 0;
 }
 
-var unityExe = UnityEditorTarget.ResolveUnityExe();
-var target = new UnityEditorTarget(unityExe, projectPath, label: $"unity:{ReadEditorVersion(projectPath)}");
+// 1-c) 손(타깃) 선택 — Unity 에디터(클라) vs UGS Cloud Code(백엔드)
+IExecTarget target;
+if (opts.Target.Equals("ugs", StringComparison.OrdinalIgnoreCase))
+{
+    var deployDir = opts.CloudCodeDir ?? Path.Combine(projectPath, "CloudCode");
+    target = new UgsTarget(projectPath, deployDir, opts.UgsProjectId, opts.UgsEnvironment);
+}
+else
+{
+    var unityExe = UnityEditorTarget.ResolveUnityExe();
+    target = new UnityEditorTarget(unityExe, projectPath, label: $"unity:{ReadEditorVersion(projectPath)}");
+}
+
+// 1-d) 조립된 시스템 프롬프트만 보고 끝내기(디버깅/설명용) — 인증 없이도 타깃별 규격을 확인할 수 있다.
+if (opts.PrintPrompt)
+{
+    Console.WriteLine($"# 타깃: {target.Name}   런타임 검증 지원: {target.Supports(VerifyKind.PlayModeAssert)}");
+    Console.WriteLine($"# 스킬: {(selectedSkills.Count == 0 ? "없음" : string.Join(", ", selectedSkills.Select(s => s.Name)))}");
+    Console.WriteLine(new string('─', 70));
+    Console.WriteLine(AgentLoop.BuildSystemPrompt(target, selectedSkills));
+    return 0;
+}
 
 // 2) 백엔드 선택 (두뇌 = pluggable)
 IAgentBackend backend;
@@ -99,12 +119,10 @@ else
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
-// 전제 확인: pipeline 서버 연결(에디터가 열려 있어야 함). 없으면 AI 호출 전에 빠르게 실패.
+// 전제 확인: 손이 준비됐는가(에디터 연결 / UGS 인증). 안 되어 있으면 AI 호출 전에 빠르게 실패.
 if (!await target.IsConnectedAsync(cts.Token))
 {
-    Console.Error.WriteLine(
-        "Unity pipeline 서버에 연결할 수 없습니다.\n" +
-        "  → GameDev-AgentLoop 를 에디터에서 열고, `unity pipeline list` 의 '서버 연결 가능' 이 true 인지 확인하세요.");
+    Console.Error.WriteLine(target.ConnectionHint);
     return 2;
 }
 
@@ -160,6 +178,11 @@ static Options ParseArgs(string[] args)
             case "--skills" when i + 1 < args.Length: o.SkillsOff = args[++i].Equals("off", StringComparison.OrdinalIgnoreCase); break;
             case "--skills-dir" when i + 1 < args.Length: o.SkillsDir = args[++i]; break;
             case "--list-skills": o.ListSkills = true; break;
+            case "--print-prompt": o.PrintPrompt = true; break;
+            case "--target" when i + 1 < args.Length: o.Target = args[++i]; break;
+            case "--ugs-project-id" when i + 1 < args.Length: o.UgsProjectId = args[++i]; break;
+            case "--ugs-env" when i + 1 < args.Length: o.UgsEnvironment = args[++i]; break;
+            case "--cloud-code-dir" when i + 1 < args.Length: o.CloudCodeDir = args[++i]; break;
             case "--max-steps" when i + 1 < args.Length: o.MaxSteps = int.Parse(args[++i]); break;
             case "--project" when i + 1 < args.Length: o.ProjectPath = args[++i]; break;
             case "--model" when i + 1 < args.Length: o.Model = args[++i]; break;
@@ -231,7 +254,12 @@ sealed class Options
     public string? Assert { get; set; }
     public bool SkillsOff { get; set; }
     public bool ListSkills { get; set; }
+    public bool PrintPrompt { get; set; }
     public string? SkillsDir { get; set; }
+    public string Target { get; set; } = "unity";   // unity | ugs
+    public string? UgsProjectId { get; set; }
+    public string? UgsEnvironment { get; set; }
+    public string? CloudCodeDir { get; set; }
     public string? ProjectPath { get; set; }
     // 백엔드별 기본값이 달라 nullable(ApiBackend→claude-opus-5, ClaudeCodeBackend→sonnet).
     public string? Model { get; set; } = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL");

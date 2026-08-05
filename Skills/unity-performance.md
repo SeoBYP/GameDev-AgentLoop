@@ -2,6 +2,7 @@
 name: unity-performance
 title: Unity 성능 — 핫패스 규칙
 always: true
+targets: unity
 ---
 
 ## GUIDANCE

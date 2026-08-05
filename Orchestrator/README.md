@@ -28,14 +28,27 @@
 
 두 축이 **pluggable** 이다:
 
-| 축 | 인터페이스 | 지금 | 나중 |
-|---|---|---|---|
-| 두뇌 | `IAgentBackend` | `ClaudeCodeBackend`(이 AI, 키 없음) · `CodexBackend`(Codex, 키 없음) · `ApiBackend`(API 키) · `ScriptedBackend`(데모) | — |
-| 손 | `IExecTarget` | `UnityEditorTarget`(`unity` CLI) | `UgsTarget`(`ugs` CLI) |
+| 축 | 인터페이스 | 구현 |
+|---|---|---|
+| 두뇌 | `IAgentBackend` | `ClaudeCodeBackend`(이 AI, 키 없음) · `CodexBackend`(Codex, 키 없음) · `ApiBackend`(API 키) · `ScriptedBackend`(데모) |
+| 손 | `IExecTarget` | `UnityEditorTarget`(클라 — `unity` CLI) · `UgsTarget`(백엔드 — `ugs` CLI) |
 
 네 백엔드가 **같은 `IAgentBackend` 계약**으로 루프에 동등하게 꽂힌다. 특히 서로 다른 두 CLI 에이전트
 (**Claude Code · Codex**)가 루프 코드 변경 0으로 같은 루프를 도는 것으로 **agent-agnostic** 을 실증했다
 — "백엔드는 텍스트 생성기, 루프가 결과물"(D1/D3)의 증거.
+
+손도 둘이다. 손이 바뀌면 **만들 것(언어)도 검증 방법도 바뀐다**:
+
+| | `--target unity` | `--target ugs` |
+|---|---|---|
+| 만드는 것 | Unity C# 컴포넌트 (`Assets/Scripts/`) | Cloud Code JS (`CloudCode/`) |
+| 1차 검증 | 컴파일 (`recompile_status`) | **배포** (`ugs deploy`) |
+| 런타임 검증 | 플레이모드 assert (`eval`) | 미지원 — CLI 에 호출 명령 없음 |
+
+그래서 `IExecTarget` 은 "적용·검증"만 갖지 않고 **자기를 설명한다**:
+`GenerationBrief`(이 손에 맞는 생성 규격) · `VerifyLabel`(1차 검증 이름) · `Supports(kind)`(가능한 검증) ·
+`IsConnectedAsync`/`ConnectionHint`(사전 점검과 해결 안내). 덕분에 루프는 **형식만** 소유하고
+언어·검증 방식은 손이 정한다. 조립 결과는 `--print-prompt` 로 그대로 볼 수 있다.
 
 ---
 
@@ -96,7 +109,22 @@ dotnet run --project Orchestrator -- --claude "스태미나 컴포넌트" \
   --assert 'var go = new UnityEngine.GameObject(); var s = go.AddComponent<Stamina>(); s.Use(500); int c = s.Current; UnityEngine.Object.DestroyImmediate(go); return c == 0;'
 ```
 
-공통 옵션: `--max-steps N` · `--project <UnityProjectPath>` · `--model <id>` · `--assert <C#>`.
+### UGS Cloud Code 로 — `--target ugs`
+
+같은 루프로 **백엔드(UGS Cloud Code)** 를 만들고 배포까지 검증한다.
+
+```bash
+# 전제: ugs CLI 설치(npm i -g ugs) + 서비스 계정 인증 + 프로젝트 지정
+ugs login                                    # 또는 UGS_CLI_SERVICE_KEY_ID / UGS_CLI_SERVICE_SECRET_KEY
+dotnet run --project Orchestrator -- --target ugs --claude "일일 보상 지급 스크립트" \
+  --ugs-project-id <project-id> --ugs-env production
+```
+
+인증·프로젝트가 준비되지 않았으면 **AI 를 부르기 전에** 안내와 함께 종료한다(`ConnectionHint`).
+옵션: `--ugs-project-id` · `--ugs-env` · `--cloud-code-dir <경로>`(기본 `CloudCode/`).
+
+공통 옵션: `--max-steps N` · `--project <경로>` · `--model <id>` · `--assert <C#>` ·
+`--target unity|ugs` · `--print-prompt`(조립된 시스템 프롬프트 출력).
 
 ---
 
@@ -211,8 +239,9 @@ Orchestrator/
 │  ├─ CodexBackend.cs         `codex exec` headless (키 없음) — agent-agnostic 증명
 │  ├─ ApiBackend.cs           Anthropic Messages API 직통 (HttpClient, 의존성 0)
 │  └─ ScriptedBackend.cs      미리 정한 응답 재생 → 키 없이 루프 증명(--demo/--demo-play)
-├─ Targets/              ── IExecTarget 구현들
-│  └─ UnityEditorTarget.cs    적용·컴파일검증 + 플레이모드 런타임 assert
+├─ Targets/              ── IExecTarget 구현들 (손)
+│  ├─ UnityEditorTarget.cs    클라 — 적용·컴파일검증 + 플레이모드 런타임 assert
+│  └─ UgsTarget.cs            백엔드 — Cloud Code JS 적용 + `ugs deploy` 배포 검증
 ├─ Skills/               ── 도메인 지식 레이어 (Phase 3)
 │  ├─ Skill.cs               스킬·검사·위반 모델
 │  ├─ SkillLibrary.cs        Skills/*.md 로드·선택·지침 생성·정적 검사 실행
@@ -283,6 +312,8 @@ Orchestrator/
 
 - **새 백엔드** — `IAgentBackend` 구현 1개 추가 + `Program.cs` 에서 선택 분기.
   `ClaudeCodeBackend` 는 `claude -p`(headless) 를 `ProcessRunner` 로 호출해 1회 응답만 받으면 된다.
-- **새 타깃** — `IExecTarget` 구현 1개 추가. `UgsTarget` 은 `ugs` CLI 로 Cloud Code 배포·호출을 검증.
+- **새 타깃** — `IExecTarget` 구현 1개 추가(자기 생성 규격·검증 방식·사전점검을 스스로 설명하면 된다).
+- **UGS 호출 검증** — 현재 `ugs` CLI 에는 스크립트 호출 명령이 없어 배포까지만 검증한다.
+  호출까지 보려면 Cloud Code REST 엔드포인트를 플레이어 토큰으로 직접 부르는 경로가 필요하다.
 - **검증 강화(계속)** — 지금은 컴파일 + 플레이모드 assert. 다음은 시나리오 재생
   (여러 프레임에 걸친 동작), 성능 예산(`get_performance_stats`), 테스트 러너(`run_tests`) 연동 등.

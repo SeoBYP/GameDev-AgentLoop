@@ -48,11 +48,16 @@ public sealed class SkillLibrary
         return new SkillLibrary(skills);
     }
 
-    /// <summary>목표에 적용할 스킬을 고른다(always 이거나 when 키워드가 목표에 포함되면 선택).</summary>
-    public IReadOnlyList<Skill> Select(string goal)
+    /// <summary>
+    /// 목표·타깃에 적용할 스킬을 고른다.
+    /// (1) 타깃이 맞아야 하고(targets 미지정이면 모든 타깃), (2) always 이거나 when 키워드가 목표에 포함되어야 한다.
+    /// </summary>
+    public IReadOnlyList<Skill> Select(string goal, string target)
     {
         var lowered = goal.ToLowerInvariant();
         return _skills
+            .Where(s => s.Targets.Count == 0 ||
+                        s.Targets.Any(t => t.Equals(target, StringComparison.OrdinalIgnoreCase)))
             .Where(s => s.Always || s.When.Any(w => lowered.Contains(w.ToLowerInvariant())))
             .ToList();
     }
@@ -168,6 +173,7 @@ public sealed class SkillLibrary
             Title: meta.TryGetValue("title", out var t) ? t.Trim() : name.Trim(),
             Always: meta.TryGetValue("always", out var a) && a.Trim().Equals("true", StringComparison.OrdinalIgnoreCase),
             When: meta.TryGetValue("when", out var w) ? SplitList(w) : Array.Empty<string>(),
+            Targets: meta.TryGetValue("targets", out var tg) ? SplitList(tg) : Array.Empty<string>(),
             Guidance: guidance.ToString(),
             Checks: ParseChecks(checkLines));
     }

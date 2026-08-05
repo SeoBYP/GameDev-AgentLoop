@@ -2,6 +2,7 @@
 name: unity-pitfalls
 title: Unity 함정 — 자주 틀리는 것들
 always: true
+targets: unity
 ---
 
 ## GUIDANCE

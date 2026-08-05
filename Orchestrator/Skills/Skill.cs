@@ -25,6 +25,7 @@ public sealed record Skill(
     string Title,
     bool Always,
     IReadOnlyList<string> When,
+    IReadOnlyList<string> Targets,   // 비어 있으면 모든 타깃. 예: ["unity"] → Unity 타깃에서만 적용
     string Guidance,
     IReadOnlyList<SkillCheck> Checks);
 

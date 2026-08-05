@@ -30,6 +30,37 @@ public sealed class UnityEditorTarget : IExecTarget
 
     public string Name => _label;
 
+    public bool Supports(VerifyKind kind) => kind is VerifyKind.Compile or VerifyKind.PlayModeAssert;
+
+    public string VerifyLabel => "컴파일";
+
+    public string ConnectionHint =>
+        "Unity pipeline 서버에 연결할 수 없습니다.\n" +
+        "  → 대상 프로젝트를 Unity 에디터에서 열고, `unity pipeline list` 의 '서버 연결 가능' 이 true 인지 확인하세요.";
+
+    /// <summary>Unity 에디터 타깃의 생성 규격 — C# 스크립트 + 플레이모드 assert 스니펫.</summary>
+    public string GenerationBrief => """
+        TARGET: Unity 6 (6000.x) Editor, C#. Assume UnityEngine is available.
+        - Put runtime scripts under Assets/Scripts/.
+
+        - After the FILE blocks, emit EXACTLY ONE runtime check as:
+        ASSERT:
+        ```csharp
+        <C# statements ending in a return>
+        ```
+          The snippet is executed inside the Unity Editor IN PLAY MODE via Roslyn (`unity command eval`).
+          Rules for the snippet:
+            * Return the string "OK" when the behavior is correct; otherwise return a SHORT string
+              explaining what was expected vs. what actually happened.
+            * Exercise the behavior the goal actually asks for, including edge cases
+              (clamping, bounds, invalid input) — not just that the type exists.
+            * It runs in play mode, so Awake/OnEnable DO run. Build objects with
+              `new UnityEngine.GameObject()` + `AddComponent<T>()`, and clean up with
+              `UnityEngine.Object.DestroyImmediate(go)` before returning.
+            * Use fully qualified UnityEngine names. Do not use `using` directives.
+            * No file I/O, no scene loading, no coroutines, no waiting across frames.
+        """;
+
     public UnityEditorTarget(string unityExe, string projectPath, string label, int timeoutSec = 120)
     {
         _unityExe = unityExe;

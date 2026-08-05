@@ -64,5 +64,10 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
 - **Phase 3 완료** — 도메인 Skills(`Skills/*.md`, 포터블 마크다운). `GUIDANCE`(프롬프트 주입=예방) +
   `CHECKS`(정적 검사=강제). 루프 ①-b 에서 **적용 전** 검사해 위반 시 반려. `--list-skills`/`--skills off`/`--demo-skills`.
   - 검사 추가 시 원칙: "이론상 나쁜 것"이 아니라 **모델이 실제로 하는 실수**를 겨냥하고, 기존 산출물로 **오탐부터 확인**.
-- 다음: Phase 4(`UgsTarget` — UGS Cloud Code 배포·호출 검증).
+- **Phase 4 진행 중** — `UgsTarget`(`ugs` CLI 1.9.0, npm 설치됨). Apply=Cloud Code JS 쓰기, Verify=`ugs deploy`.
+  `IExecTarget` 이 자기를 설명하도록 확장: `GenerationBrief`·`VerifyLabel`·`Supports(kind)`·`IsConnectedAsync`/`ConnectionHint`.
+  시스템 프롬프트 = [루프 형식] + [손의 규격] + [스킬 지침] (`--print-prompt` 로 확인). 스킬은 `targets:` 로 타깃 필터.
+  - **한계(정직히)**: `ugs` CLI 에 스크립트 호출 명령이 없어 배포까지만 검증(`Supports(PlayModeAssert)==false`).
+  - **미실측**: 실제 배포 성공 경로 — 서비스 계정 키(사용자가 `ugs login`) 필요. 비밀키는 다루지 않는다.
+- 다음: UGS 실배포 실측 → Cloud Code REST 호출 검증.
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

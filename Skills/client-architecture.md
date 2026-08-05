@@ -2,6 +2,7 @@
 name: client-architecture
 title: 클라이언트 아키텍처 — 컴포넌트 설계
 always: true
+targets: unity
 ---
 
 ## GUIDANCE

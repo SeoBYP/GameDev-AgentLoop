@@ -97,7 +97,7 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 | **1** ✅ | 로컬 순수 루프 골격 (`ApiBackend` + `UnityEditorTarget`) | 자가수리로 컴파일 통과하는 루프 — **달성**(§6.5) |
 | **2** ✅ | CLI 백엔드(ClaudeCode/Codex) + 플레이모드 검증 | agent-agnostic 실증 + **런타임 동작 검증** — 달성(§6.5) |
 | **3** ✅ | 도메인 Skills(최적화·아키텍처·함정) | 산출 코드 "품질" 대조 데모 — 달성(§6.7) |
-| **4** | `UgsTarget`(Cloud Code 배포·검증) | 클라+백엔드 풀스택 |
+| **4** 🚧 | `UgsTarget`(Cloud Code 배포·검증) | 구현·검증 완료, **실배포는 사용자 인증 대기**(§6.8) |
 
 ---
 
@@ -180,6 +180,37 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 
 **한계**: 검사는 정규식 + 중괄호 매칭 수준이라 국소 규칙만 잡는다(의존성 0 유지가 목적).
 구문 수준 규칙이 필요해지면 Roslyn 분석기로 승격하면 된다.
+
+---
+
+## 6.8 UgsTarget — 두 번째 손 (Phase 4)
+
+손을 바꾸면 같은 루프가 **클라(Unity)** 대신 **백엔드(UGS Cloud Code)** 를 만든다. 두뇌가 넷이 된 데 이어
+손이 둘이 되면서 "두 축이 pluggable"(D2/D5)이 코드로 완성된다.
+
+**손이 바뀌면 바뀌는 것**
+
+| | `UnityEditorTarget` | `UgsTarget` |
+|---|---|---|
+| 산출물 | C# 컴포넌트 (`Assets/Scripts/`) | Cloud Code JS (`CloudCode/`) |
+| 1차 검증 | 컴파일 (`recompile_status`) | **배포** (`ugs deploy`) — 서버가 스크립트를 검증 |
+| 런타임 검증 | 플레이모드 assert (`eval`) | 미지원 |
+
+**그래서 `IExecTarget` 이 자기를 설명하게 했다.** 초안(§4)의 인터페이스는 `Apply`/`Verify` 뿐이었지만,
+타깃마다 *만들 언어*와 *가능한 검증*이 달라 루프가 그걸 알아야 했다:
+`GenerationBrief`(생성 규격) · `VerifyLabel` · `Supports(kind)` · `IsConnectedAsync`/`ConnectionHint`.
+→ 시스템 프롬프트 = **[루프의 형식 계약] + [손의 생성 규격] + [스킬의 품질 지침]** 으로 조립된다
+(`--print-prompt` 로 확인). 루프는 형식만 소유한다.
+
+**정직한 한계 — 호출 검증은 없다.**
+`ugs cloud-code scripts` 에는 create/publish/get/list/update/delete 만 있고 **invoke/run 이 없다.**
+그래서 이 타깃은 `Supports(PlayModeAssert) == false` 를 반환하고, 루프는 런타임 단계를 건너뛴다.
+없는 기능을 있는 척하지 않는다 — 호출까지 검증하려면 Cloud Code REST 엔드포인트를 플레이어 토큰으로
+직접 부르는 경로가 필요하고, 그건 다음 단계다.
+
+**검증 범위(현재)**: 파일 적용 · `ugs deploy` 호출/결과 파싱 · 타깃별 프롬프트 조립 · 타깃별 스킬 필터 ·
+미인증 시 사전 차단까지 실측 확인. **실제 배포 성공 경로**는 서비스 계정 키가 필요해 사용자 설정 후 확인한다
+(비밀키는 오케스트레이터가 다루지 않는다 — `ugs login` 또는 환경변수로 CLI 가 보관).
 
 ---
 
