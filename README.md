@@ -13,6 +13,7 @@ C# 오케스트레이터가 소유해, "코드 생성"을 **"동작 검증된 �
 ## 구조
 - `Assets/` 등 — Unity 프로젝트 (루프의 *타깃*). `com.unity.pipeline` 로 CLI가 에디터를 조작·검증.
 - `Orchestrator/` — C# 콘솔 (루프 소유자). → [Orchestrator/README.md](Orchestrator/README.md)
+- `Skills/` — 도메인 지식 레이어 (품질 강제). → [Skills/README.md](Skills/README.md)
 
 ## 설계
 - **루프는 우리 것**, AI 백엔드는 텍스트 생성기로만 (교체 가능).
@@ -33,12 +34,13 @@ dotnet run --project Orchestrator -- --claude "간단한 HP 컴포넌트를 만�
 dotnet run --project Orchestrator -- "간단한 HP 컴포넌트를 만들어줘"
 
 # 키 없이 루프 증명
-dotnet run --project Orchestrator -- --demo        # 컴파일 자가수리 (깨진 코드 → 에러 → 수리)
-dotnet run --project Orchestrator -- --demo-play   # 런타임 검증 (컴파일은 통과하나 동작이 틀린 코드)
+dotnet run --project Orchestrator -- --demo         # 컴파일 자가수리 (깨진 코드 → 에러 → 수리)
+dotnet run --project Orchestrator -- --demo-play    # 런타임 검증 (컴파일은 통과하나 동작이 틀린 코드)
+dotnet run --project Orchestrator -- --demo-skills  # 품질 강제 (도메인 규칙 위반 → 적용 거부 → 수리)
 ```
 
 ## 상태
-**Phase 1 + Phase 2 완료 — agent-agnostic + 런타임 동작 검증.**
+**Phase 1~3 완료 — agent-agnostic + 런타임 동작 검증 + 품질 강제.**
 루프 5단계 골격 완성, 백엔드 4종(`ClaudeCodeBackend`·`CodexBackend`·`ApiBackend`·`ScriptedBackend`)이
 같은 계약으로 꽂힌다.
 
@@ -47,5 +49,8 @@ dotnet run --project Orchestrator -- --demo-play   # 런타임 검증 (컴파일
   런타임 assert 가 잡아내고(`Use(500) 후 Current 는 0 이어야 하는데 -400`) 2스텝 만에 수리.
 - **agent-agnostic** — Claude Code · Codex 두 CLI 에이전트가 **루프 코드 변경 0**으로 같은 루프를 돈다.
 - 실제 AI 는 코드와 함께 **런타임 검증 스니펫(ASSERT)까지 스스로 작성**하고, 루프가 그걸 플레이모드에서 실행한다.
+- **도메인 Skills 로 품질 강제** — `Skills/*.md` 의 규칙을 프롬프트로 주입(예방)하고 정적 검사로 반려(강제).
+  같은 목표·모델에서 스킬만 켜면 `public` 필드 → `[SerializeField] private`, 거리 비교 → `sqrMagnitude`,
+  프로퍼티 반복 접근 → 지역변수 캐싱으로 산출물이 바뀐다.
 
-다음: Phase 3 — 도메인 Skills(성능·아키텍처·Unity 함정)로 산출물 "품질" 강제.
+다음: Phase 4 — `UgsTarget`(UGS Cloud Code 배포·검증)로 클라 + 백엔드 풀스택.

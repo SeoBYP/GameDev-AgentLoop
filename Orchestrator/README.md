@@ -13,6 +13,7 @@
 ```
 목표(자연어)
  → ① 생성   IAgentBackend.CompleteAsync   (파일편집 + 런타임 ASSERT 스니펫 out)
+   ①-b 검사  SkillLibrary.Inspect         (도메인 스킬 정적 검사 — 위반 시 적용 전 반려)
  → ② 적용   IExecTarget.ApplyAsync        (Assets/ 파일쓰기 + `recompile` 트리거)
  → ③ 검증   IExecTarget.VerifyAsync
        ③-a  컴파일       `recompile_status` 폴링 → 컴파일 에러?
@@ -69,8 +70,20 @@ dotnet run --project Orchestrator -- "간단한 HP 컴포넌트를 만들어줘"
 스크립트 백엔드로 루프를 결정적으로 보여준다(키 불필요).
 
 ```bash
-dotnet run --project Orchestrator -- --demo        # 컴파일 자가수리: 세미콜론 누락 → 에러 → 수리 → 통과
-dotnet run --project Orchestrator -- --demo-play   # 런타임 검증: 컴파일은 통과하나 동작이 틀린 코드 → 수리
+dotnet run --project Orchestrator -- --demo         # 컴파일 자가수리: 세미콜론 누락 → 에러 → 수리 → 통과
+dotnet run --project Orchestrator -- --demo-play    # 런타임 검증: 컴파일은 통과하나 동작이 틀린 코드 → 수리
+dotnet run --project Orchestrator -- --demo-skills  # 품질 강제: 도메인 규칙 위반 → 적용 거부 → 수리
+```
+
+### 도메인 스킬 — `--skills` / `--list-skills`
+
+`Skills/*.md` 의 규칙을 시스템 프롬프트에 주입하고, 생성물에 정적 검사를 강제한다
+(자세한 형식·효과는 [../Skills/README.md](../Skills/README.md)).
+
+```bash
+dotnet run --project Orchestrator -- --list-skills            # 로드된 스킬·검사 목록
+dotnet run --project Orchestrator -- --claude "..."           # 스킬 적용(기본)
+dotnet run --project Orchestrator -- --claude "..." --skills off   # 스킬 없이(대조용)
 ```
 
 ### 검증 기준을 사람이 지정 — `--assert`
@@ -124,6 +137,32 @@ dotnet run --project Orchestrator -- --claude "스태미나 컴포넌트" \
 ASSERT 블록을 작성**하고 루프가 그걸 플레이모드에서 실행해 검증한다
 (산출물 [../Assets/Scripts/CooldownTimer.cs](../Assets/Scripts/CooldownTimer.cs)).
 
+### 품질 강제 — 도메인 스킬 (`--demo-skills`, `--skills off` 대조)
+
+지침을 프롬프트로 주는 데 그치지 않고, **적용 전에 검사로 반려**한다:
+
+```
+──────── step 1/3 ────────
+① 생성  → 파일 편집 1개
+①-b 검사 → 스킬 위반 3건 ❌ (적용하지 않음)
+      · [client-architecture/no-public-mutable-field] Follower.cs: public 필드를 노출하지 마세요...
+      · [unity-performance/no-getcomponent-in-update]  Follower.cs: Update 계열에서 GetComponent 를... (문제 메서드: Update)
+      · [unity-performance/no-debuglog-in-update]      Follower.cs: Update 계열에서 Debug.Log 를... (문제 메서드: Update)
+
+──────── step 2/3 ────────
+①-b 검사 → 스킬 통과 ✅ → ② 적용 → ③ 컴파일 ✅ → ③ 런타임 assert ✅
+```
+
+**대조 실험**(같은 목표·같은 모델, 스킬만 on/off — 산출물 차이):
+
+| 스킬 규칙 | `--skills off` | 스킬 적용 |
+|---|---|---|
+| public 필드 금지 | `public float moveSpeed = 5f;` | `[SerializeField] private float _moveSpeed = 5f;` |
+| 제곱근 회피 | `transform.position == target` | `(newPos - target).sqrMagnitude <= thresholdSqr` |
+| 프로퍼티 반복 접근 | `transform.position` 3회 읽음 | 지역 변수 캐싱 |
+| 상태 변화 통지 | 없음 | `event Action<Vector3> OnTargetChanged` |
+| 성공/실패 반환 | `void SetDestination(...)` | `bool SetTargetPosition(...)` + 입력 검증 |
+
 ### agent-agnostic — Codex 도 같은 루프로
 
 `--codex`(gpt-5.4-mini)로 **오브젝트 풀**을 생성 → 같은 루프가 적용·검증 → **1스텝 통과**.
@@ -137,24 +176,24 @@ ASSERT 블록을 작성**하고 루프가 그걸 플레이모드에서 실행해
 `--demo` 실행 로그 — **2스텝 만에 자가수리로 컴파일 통과**:
 
 ```
-목표: 간단한 Health(HP) 컴포넌트를 만들어줘. ...
-백엔드: scripted:demo   타깃: unity:6000.5.4f1   maxSteps: 6
-
 ──────── step 1/6 ────────
 ① 생성  → 파일 편집 1개
-② 적용  → 1개 파일 적용 + 리컴파일 트리거: Assets/Scripts/Health.cs
+①-b 검사 → 스킬 통과 ✅
+② 적용  → 1개 파일 적용 + 리컴파일 트리거: Assets/Scripts/DemoHealth.cs
 ③ 검증  → 컴파일 에러 1건 ❌
-      · Assets\Scripts\Health.cs(6,29): error CS1002: ; expected
+      · Assets\Scripts\DemoHealth.cs(5,44): error CS1002: ; expected
 
 ──────── step 2/6 ────────
 ① 생성  → 파일 편집 1개
-② 적용  → 1개 파일 적용 + 리컴파일 트리거: Assets/Scripts/Health.cs
+①-b 검사 → 스킬 통과 ✅
+② 적용  → 1개 파일 적용 + 리컴파일 트리거: Assets/Scripts/DemoHealth.cs
 ③ 검증  → 컴파일 통과 ✅
 
-✅ 성공 — 2스텝 만에 컴파일 통과
+✅ 성공 — 2스텝 만에 컴파일 통과 (런타임 assert 없음)
 ```
 
-에러 문자열(`Assets\Scripts\Health.cs(6,29): error CS1002`)은 **실제 실행 중인 Unity 에디터의 Roslyn 컴파일러**에서 나온 것이다. 루프가 그걸 읽어 다음 스텝 맥락에 넣고, 백엔드가 고친다. 이게 "검증이 1급 시민"(D4)의 실체다.
+에러 문자열(`DemoHealth.cs(5,44): error CS1002`)은 **실제 실행 중인 Unity 에디터의 Roslyn 컴파일러**에서
+나온 것이다. 루프가 그걸 읽어 다음 스텝 맥락에 넣고, 백엔드가 고친다. 이게 "검증이 1급 시민"(D4)의 실체다.
 
 ---
 
@@ -174,6 +213,10 @@ Orchestrator/
 │  └─ ScriptedBackend.cs      미리 정한 응답 재생 → 키 없이 루프 증명(--demo/--demo-play)
 ├─ Targets/              ── IExecTarget 구현들
 │  └─ UnityEditorTarget.cs    적용·컴파일검증 + 플레이모드 런타임 assert
+├─ Skills/               ── 도메인 지식 레이어 (Phase 3)
+│  ├─ Skill.cs               스킬·검사·위반 모델
+│  ├─ SkillLibrary.cs        Skills/*.md 로드·선택·지침 생성·정적 검사 실행
+│  └─ CSharpSource.cs        메서드 몸통 추출(중괄호 매칭) — 스코프 한정 검사용
 ├─ Loop/                 ── 루프 그 자체
 │  ├─ AgentLoop.cs            5단계 오케스트레이션 ("루프는 우리 것"의 실체) + 출력 계약
 │  └─ LoopOptions.cs          maxSteps 가드 · 사람 지정 assert · 결과 타입

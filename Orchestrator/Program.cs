@@ -1,6 +1,7 @@
 using Orchestrator.Backends;
 using Orchestrator.Contracts;
 using Orchestrator.Loop;
+using Orchestrator.Skills;
 using Orchestrator.Targets;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,6 +26,28 @@ if (projectPath is null || !Directory.Exists(Path.Combine(projectPath, "Assets")
     return 2;
 }
 
+// 1-b) 도메인 스킬 로드 (Phase 3) — 포터블 마크다운이라 모든 백엔드에 동일하게 적용된다.
+var skillsDir = opts.SkillsDir ?? Path.Combine(projectPath, "Skills");
+var library = opts.SkillsOff ? SkillLibrary.Empty : SkillLibrary.Load(skillsDir);
+var selectedSkills = library.Select(opts.Goal);
+
+if (opts.ListSkills)
+{
+    Console.WriteLine($"스킬 디렉터리: {skillsDir}");
+    if (library.All.Count == 0)
+    {
+        Console.WriteLine("  (스킬 없음)");
+    }
+    foreach (var s in library.All)
+    {
+        var mark = selectedSkills.Contains(s) ? "✓" : " ";
+        Console.WriteLine($"  [{mark}] {s.Name} — {s.Title}  (검사 {s.Checks.Count}개)");
+        foreach (var c in s.Checks)
+            Console.WriteLine($"        · {c.Id}  [{string.Join(", ", c.Scopes)}]");
+    }
+    return 0;
+}
+
 var unityExe = UnityEditorTarget.ResolveUnityExe();
 var target = new UnityEditorTarget(unityExe, projectPath, label: $"unity:{ReadEditorVersion(projectPath)}");
 
@@ -37,6 +60,10 @@ if (opts.Demo)
 else if (opts.DemoPlay)
 {
     backend = new ScriptedBackend(DemoScript.CompilesButWrongStamina);
+}
+else if (opts.DemoSkills)
+{
+    backend = new ScriptedBackend(DemoScript.SkillViolationThenFixed);
 }
 else if (opts.Claude)
 {
@@ -81,11 +108,15 @@ if (!await target.IsConnectedAsync(cts.Token))
     return 2;
 }
 
-var loop = new AgentLoop(backend, target, new LoopOptions
-{
-    MaxSteps = opts.MaxSteps,
-    Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
-});
+var loop = new AgentLoop(
+    backend,
+    target,
+    new LoopOptions
+    {
+        MaxSteps = opts.MaxSteps,
+        Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
+    },
+    selectedSkills);
 
 try
 {
@@ -122,9 +153,13 @@ static Options ParseArgs(string[] args)
         {
             case "--demo": o.Demo = true; break;
             case "--demo-play": o.DemoPlay = true; break;
+            case "--demo-skills": o.DemoSkills = true; break;
             case "--claude": o.Claude = true; break;
             case "--codex": o.Codex = true; break;
             case "--assert" when i + 1 < args.Length: o.Assert = args[++i]; break;
+            case "--skills" when i + 1 < args.Length: o.SkillsOff = args[++i].Equals("off", StringComparison.OrdinalIgnoreCase); break;
+            case "--skills-dir" when i + 1 < args.Length: o.SkillsDir = args[++i]; break;
+            case "--list-skills": o.ListSkills = true; break;
             case "--max-steps" when i + 1 < args.Length: o.MaxSteps = int.Parse(args[++i]); break;
             case "--project" when i + 1 < args.Length: o.ProjectPath = args[++i]; break;
             case "--model" when i + 1 < args.Length: o.Model = args[++i]; break;
@@ -132,7 +167,17 @@ static Options ParseArgs(string[] args)
         }
     }
     if (positional.Count > 0)
+    {
         o.Goal = string.Join(' ', positional);
+    }
+    else
+    {
+        // 데모는 목표를 무시하고 스크립트를 재생하므로, 로그가 산출물과 맞도록 기본 목표를 맞춰 준다.
+        if (o.DemoPlay)
+            o.Goal = "스태미나 컴포넌트를 만들어줘. Use(int)/Recover(int) 를 갖고, 값은 0~Max 를 벗어나지 않는다.";
+        else if (o.DemoSkills)
+            o.Goal = "대상을 따라가는 Follower 컴포넌트를 만들어줘. 속도와 대상은 인스펙터에서 설정한다.";
+    }
     return o;
 }
 
@@ -180,9 +225,13 @@ sealed class Options
     public int MaxSteps { get; set; } = 6;
     public bool Demo { get; set; }
     public bool DemoPlay { get; set; }
+    public bool DemoSkills { get; set; }
     public bool Claude { get; set; }
     public bool Codex { get; set; }
     public string? Assert { get; set; }
+    public bool SkillsOff { get; set; }
+    public bool ListSkills { get; set; }
+    public string? SkillsDir { get; set; }
     public string? ProjectPath { get; set; }
     // 백엔드별 기본값이 달라 nullable(ApiBackend→claude-opus-5, ClaudeCodeBackend→sonnet).
     public string? Model { get; set; } = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL");
@@ -194,36 +243,44 @@ static class DemoScript
 {
     public static readonly IReadOnlyList<string> BrokenThenFixedHealth = new[]
     {
-        // step 1 — 일부러 깨뜨림: `Current = 100` 뒤 세미콜론 누락 → CS1002
+        // step 1 — 일부러 깨뜨림: `_max = 100` 뒤 세미콜론 누락 → CS1002
         """
-        FILE: Assets/Scripts/Health.cs
+        FILE: Assets/Scripts/DemoHealth.cs
         ```csharp
         using UnityEngine;
 
-        public class Health : MonoBehaviour
+        public class DemoHealth : MonoBehaviour
         {
-            public int Max = 100;
-            public int Current = 100
+            [SerializeField] private int _max = 100
+
+            public int Max => _max;
+            public int Current { get; private set; }
+
+            private void Awake() => Current = _max;
 
             public void TakeDamage(int amount) => Current = Mathf.Max(0, Current - amount);
-            public void Heal(int amount)       => Current = Mathf.Min(Max, Current + amount);
+            public void Heal(int amount)       => Current = Mathf.Min(_max, Current + amount);
         }
         ```
         """,
 
         // step 2 — 세미콜론 추가로 수정
         """
-        FILE: Assets/Scripts/Health.cs
+        FILE: Assets/Scripts/DemoHealth.cs
         ```csharp
         using UnityEngine;
 
-        public class Health : MonoBehaviour
+        public class DemoHealth : MonoBehaviour
         {
-            public int Max = 100;
-            public int Current = 100;
+            [SerializeField] private int _max = 100;
+
+            public int Max => _max;
+            public int Current { get; private set; }
+
+            private void Awake() => Current = _max;
 
             public void TakeDamage(int amount) => Current = Mathf.Max(0, Current - amount);
-            public void Heal(int amount)       => Current = Mathf.Min(Max, Current + amount);
+            public void Heal(int amount)       => Current = Mathf.Min(_max, Current + amount);
         }
         ```
         """,
@@ -243,10 +300,12 @@ static class DemoScript
 
         public class Stamina : MonoBehaviour
         {
-            public int Max = 100;
-            public int Current;
+            [SerializeField] private int _max = 100;
 
-            private void Awake() => Current = Max;
+            public int Max => _max;
+            public int Current { get; private set; }
+
+            private void Awake() => Current = _max;
 
             public void Use(int amount)     => Current -= amount;
             public void Recover(int amount) => Current += amount;
@@ -275,10 +334,12 @@ static class DemoScript
 
         public class Stamina : MonoBehaviour
         {
-            public int Max = 100;
-            public int Current;
+            [SerializeField] private int _max = 100;
 
-            private void Awake() => Current = Max;
+            public int Max => _max;
+            public int Current { get; private set; }
+
+            private void Awake() => Current = _max;
 
             public void Use(int amount)     => Current = Mathf.Max(0, Current - amount);
             public void Recover(int amount) => Current = Mathf.Min(Max, Current + amount);
@@ -296,6 +357,77 @@ static class DemoScript
         if (afterUse != 0) return "Use(500) 후 Current 는 0 이어야 하는데 " + afterUse + " 였습니다.";
         if (afterRecover != 100) return "Recover(9999) 후 Current 는 Max(100) 이어야 하는데 " + afterRecover + " 였습니다.";
         return "OK";
+        ```
+        """,
+    };
+
+    // --demo-skills 스크립트: 도메인 스킬의 **정적 검사가 실제로 반려하는** 경로를 결정적으로 보여준다.
+    // step 1) public 필드 + Update 안 GetComponent/Debug.Log → 프로젝트에 **적용되기 전에** 반려.
+    // step 2) 캡슐화 + Awake 캐싱으로 수정 → 통과.
+    // 지침(프롬프트)으로 권고하는 데 그치지 않고 검사로 강제한다는 게 Phase 3 의 핵심.
+    public static readonly IReadOnlyList<string> SkillViolationThenFixed = new[]
+    {
+        // step 1 — 컴파일은 되지만 도메인 규칙을 여럿 어긴다.
+        """
+        FILE: Assets/Scripts/Follower.cs
+        ```csharp
+        using UnityEngine;
+
+        public class Follower : MonoBehaviour
+        {
+            public float speed = 3f;
+            public Transform target;
+
+            private void Update()
+            {
+                var body = GetComponent<Rigidbody>();
+                Debug.Log("following");
+                if (target != null)
+                {
+                    transform.position = Vector3.MoveTowards(transform.position, target.position, speed * Time.deltaTime);
+                }
+            }
+        }
+        ```
+        """,
+
+        // step 2 — 캡슐화 + Awake 캐싱 + 프레임 의존 분리로 수정.
+        """
+        FILE: Assets/Scripts/Follower.cs
+        ```csharp
+        using UnityEngine;
+
+        public class Follower : MonoBehaviour
+        {
+            [SerializeField] private float _speed = 3f;
+            [SerializeField] private Transform _target;
+
+            private Rigidbody _body;
+
+            public bool HasTarget => _target != null;
+
+            private void Awake() => _body = GetComponent<Rigidbody>();
+
+            private void Update() => Tick(Time.deltaTime);
+
+            public void Tick(float deltaTime)
+            {
+                if (_target == null)
+                {
+                    return;
+                }
+
+                transform.position = Vector3.MoveTowards(transform.position, _target.position, _speed * deltaTime);
+            }
+        }
+        ```
+        ASSERT:
+        ```csharp
+        var go = new UnityEngine.GameObject();
+        var f = go.AddComponent<Follower>();
+        bool has = f.HasTarget;
+        UnityEngine.Object.DestroyImmediate(go);
+        return has ? "target 이 없는데 HasTarget 이 true 입니다." : "OK";
         ```
         """,
     };

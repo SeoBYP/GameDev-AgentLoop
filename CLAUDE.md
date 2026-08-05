@@ -61,6 +61,8 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
 - **도구 설치됨:** Unity CLI(`%LOCALAPPDATA%\Unity\bin\unity.exe`, beta 1.0.0-beta.3) + `com.unity.pipeline 0.4.0-exp.1`(서버 포트 7800). .NET 10 SDK.
   - 루프 실행 전제: 이 프로젝트를 에디터에서 열어 pipeline 서버를 띄운다(`unity pipeline list` → `서버 연결 가능: true`).
   - `unity auth login` 불필요(로컬 동작). `ANTHROPIC_API_KEY` 는 환경변수로만, 실제 모델 실행 시 필요.
-- **Phase 2 완료** — agent-agnostic(두 CLI 에이전트) + 플레이모드 런타임 검증.
-- 다음: Phase 3(도메인 Skills — 성능·아키텍처·Unity 함정으로 산출물 품질 강제).
+- **Phase 3 완료** — 도메인 Skills(`Skills/*.md`, 포터블 마크다운). `GUIDANCE`(프롬프트 주입=예방) +
+  `CHECKS`(정적 검사=강제). 루프 ①-b 에서 **적용 전** 검사해 위반 시 반려. `--list-skills`/`--skills off`/`--demo-skills`.
+  - 검사 추가 시 원칙: "이론상 나쁜 것"이 아니라 **모델이 실제로 하는 실수**를 겨냥하고, 기존 산출물로 **오탐부터 확인**.
+- 다음: Phase 4(`UgsTarget` — UGS Cloud Code 배포·호출 검증).
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

@@ -1,4 +1,5 @@
 using Orchestrator.Contracts;
+using Orchestrator.Skills;
 using Orchestrator.Util;
 
 namespace Orchestrator.Loop;
@@ -21,13 +22,20 @@ public sealed class AgentLoop
     private readonly IAgentBackend _backend;
     private readonly IExecTarget _target;
     private readonly LoopOptions _options;
+    private readonly IReadOnlyList<Skill> _skills;
     private readonly Action<string> _log;
 
-    public AgentLoop(IAgentBackend backend, IExecTarget target, LoopOptions options, Action<string>? log = null)
+    public AgentLoop(
+        IAgentBackend backend,
+        IExecTarget target,
+        LoopOptions options,
+        IReadOnlyList<Skill>? skills = null,
+        Action<string>? log = null)
     {
         _backend = backend;
         _target = target;
         _options = options;
+        _skills = skills ?? Array.Empty<Skill>();
         _log = log ?? Console.WriteLine;
     }
 
@@ -35,7 +43,11 @@ public sealed class AgentLoop
     {
         _log($"목표: {goal}");
         _log($"백엔드: {_backend.Name}   타깃: {_target.Name}   maxSteps: {_options.MaxSteps}");
+        _log(_skills.Count > 0
+            ? $"스킬: {string.Join(", ", _skills.Select(s => s.Name))} ({_skills.Sum(s => s.Checks.Count)}개 검사)"
+            : "스킬: 없음 (--skills off)");
 
+        var system = SystemPromptBase + BuildSkillSection();
         var history = new List<Turn> { new(Role.User, BuildInitialPrompt(goal)) };
 
         for (int step = 1; step <= _options.MaxSteps; step++)
@@ -43,7 +55,7 @@ public sealed class AgentLoop
             _log($"\n──────── step {step}/{_options.MaxSteps} ────────");
 
             // ① 생성
-            var reply = await _backend.CompleteAsync(new AgentContext(SystemPrompt, history), ct);
+            var reply = await _backend.CompleteAsync(new AgentContext(system, history), ct);
             history.Add(new Turn(Role.Assistant, reply.Text));
             _log($"① 생성  → 파일 편집 {reply.Edits.Count}개");
 
@@ -52,6 +64,24 @@ public sealed class AgentLoop
                 _log("   (파싱된 FILE 블록 없음 — 형식 재요청)");
                 history.Add(new Turn(Role.User, NoEditsFeedback));
                 continue;
+            }
+
+            // ①-b 스킬 정적 검사 — 프로젝트에 적용하기 **전에** 품질 위반을 거른다.
+            // 지침을 프롬프트로 주는 데서 그치지 않고 검사로 강제하는 게 Phase 3 의 핵심이다.
+            if (_skills.Count > 0)
+            {
+                var violations = SkillLibrary.Inspect(_skills, reply.Edits);
+                if (violations.Count > 0)
+                {
+                    _log($"①-b 검사 → 스킬 위반 {violations.Count}건 ❌ (적용하지 않음)");
+                    foreach (var v in violations.Take(5))
+                        _log($"      · {v}");
+
+                    // ④ 피드백 → 다음 스텝 ①로
+                    history.Add(new Turn(Role.User, BuildViolationFeedback(violations)));
+                    continue;
+                }
+                _log("①-b 검사 → 스킬 통과 ✅");
             }
 
             // ② 적용
@@ -109,7 +139,7 @@ public sealed class AgentLoop
 
     // ── 프롬프트/피드백 (출력 계약을 시스템 프롬프트로 강제 — DESIGN.md §4) ──────────
 
-    private const string SystemPrompt = """
+    private const string SystemPromptBase = """
         You are a Unity C# code generator running inside an automated build → verify → repair loop.
 
         OUTPUT CONTRACT (STRICT):
@@ -144,6 +174,13 @@ public sealed class AgentLoop
         implementation and re-emit the COMPLETE corrected file(s) plus the ASSERT block.
         """;
 
+    // 선택된 스킬의 지침을 시스템 프롬프트 뒤에 붙인다(스킬이 없으면 빈 문자열).
+    private string BuildSkillSection()
+    {
+        var guidance = SkillLibrary.BuildGuidance(_skills);
+        return guidance.Length == 0 ? string.Empty : "\n\n" + guidance;
+    }
+
     private static string BuildInitialPrompt(string goal) =>
         $"목표: {goal}\n\n위 목표를 만족하는 Unity C# 파일을 출력 계약(FILE: + ```csharp 펜스) 형식으로 생성하세요.";
 
@@ -158,6 +195,20 @@ public sealed class AgentLoop
             (부분 수정/diff 금지 — 전체 파일 재출력):
 
             {list}
+            """;
+    }
+
+    // 도메인 스킬 위반 피드백. 파일이 프로젝트에 적용되기 전 단계라 "다시 내라"가 명확하다.
+    private static string BuildViolationFeedback(IReadOnlyList<SkillViolation> violations)
+    {
+        var list = string.Join("\n", violations.Select(v => $"  - {v.FilePath}: {v.Message}"));
+        return $"""
+            도메인 규칙(DOMAIN RULES) 위반이 발견되어 적용하지 않았습니다:
+
+            {list}
+
+            규칙을 지키도록 구현을 고쳐 전체 파일을 다시 출력하세요
+            (예: Update 계열에서 쓰던 탐색/캐싱 대상은 Awake 또는 Start 에서 한 번만 확보해 필드에 보관).
             """;
     }
 

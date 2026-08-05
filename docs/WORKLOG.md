@@ -132,6 +132,55 @@
 완화책: 피드백에 "assert 말고 구현을 고쳐라" 명시 + `--assert` 사람 주입 경로.
 근본 해결(기준을 생성자와 분리)은 Phase 3 의 몫.
 
+---
+
+## 2026-08 · Phase 3 — 도메인 Skills (품질 강제)
+
+### 목표
+"도는가"를 넘어 **"잘 만들었는가"** 를 강제한다. 도는 코드에도 Update 안 탐색·public 필드 남발·
+매 프레임 할당 같은 품질 문제가 남기 때문.
+
+### 결정: 포터블 마크다운 (DESIGN §7 열린 질문 해소)
+`.claude/skills` 전용 포맷을 쓰면 Codex/API 백엔드에서 안 먹어 D1(백엔드 교체 가능)이 깨진다.
+→ 스킬은 **오케스트레이터가 소유하는 `Skills/*.md`** 로 두고 모든 백엔드에 동일 적용.
+
+### 한 일
+- `Skills/` 에 스킬 3종: `unity-performance`(검사 5) · `unity-pitfalls`(3) · `client-architecture`(1).
+  각 파일은 `## GUIDANCE`(프롬프트 주입) + `## CHECKS`(정적 검사)로 구성.
+- `Orchestrator/Skills/`: `SkillLibrary`(로드·선택·지침 생성·검사 실행), `CSharpSource`(중괄호 매칭으로
+  메서드 몸통 추출 → "Update 안에서만" 같은 스코프 한정 검사), 의존성 0 유지(YAML 파서도 안 씀).
+- 루프에 **①-b 단계** 추가: 생성 직후 **프로젝트에 쓰기 전에** 검사 → 위반 시 반려·피드백.
+- 플래그: `--list-skills`, `--skills off`(대조용), `--skills-dir`, 데모 `--demo-skills`.
+
+### 실측 — 대조 실험 (같은 목표·같은 모델, 스킬만 on/off)
+| 규칙 | `--skills off` | 스킬 적용 |
+|---|---|---|
+| public 필드 | `public float moveSpeed = 5f;` | `[SerializeField] private float _moveSpeed = 5f;` |
+| 제곱근 회피 | `transform.position == target` | `(newPos - target).sqrMagnitude <= thresholdSqr` |
+| 프로퍼티 반복 접근 | `transform.position` 3회 | 지역변수 캐싱 |
+| 상태 변화 통지 | 없음 | `event Action<Vector3>` |
+| 성공/실패 | `void` | `bool` + NaN 입력 검증 |
+
+`--demo-skills`: 위반 3건(public 필드 / Update 안 GetComponent / Update 안 Debug.Log) 검출 →
+**적용하지 않고** 반려 → 수정본 통과.
+
+### 발견
+- **요즘 모델은 기본기가 좋다.** 스킬 없이도 `Camera.main` 은 `Awake` 에 캐싱했다.
+  그래서 처음 만든 검사 5개는 아무것도 잡지 못했다. 실제로 자주 어기는 규칙
+  (**public 필드 노출**)을 검사로 추가하자 비로소 대조가 드러났다.
+  → 교훈: 검사는 "이론상 나쁜 것"이 아니라 **모델이 실제로 하는 실수**를 겨냥해야 값어치가 있다.
+- 검사 정규식은 추가 전에 **기존 산출물 5개에 돌려 오탐을 먼저 확인**했다
+  (프로퍼티 `=>`, `event`, `const`, 메서드 선언이 걸리지 않는지). 오탐은 루프를 망가뜨린다.
+- **검사는 소급 적용된다** — `no-public-mutable-field` 를 추가하자 기존 `--demo`/`--demo-play`
+  스크립트(`public int Max = 100;`)가 반려되며 `--demo` 가 maxSteps 까지 돌다 실패했다.
+  스크립트 백엔드는 같은 답을 반복하므로 영원히 못 고친다. → 데모 코드도 규칙을 지키도록 고쳤고
+  (`[SerializeField] private` + 읽기 전용 프로퍼티), 겸사겸사 데모 파일을 AI 산출물과 분리했다
+  (`Health.cs` → `DemoHealth.cs`). 규칙을 추가할 땐 **레포 전체가 그 규칙을 만족하는지** 확인해야 한다.
+
+### 한계
+검사는 정규식 + 중괄호 매칭 수준이라 국소 규칙만 잡는다(의존성 0 유지가 목적).
+구문 수준 규칙이 필요해지면 Roslyn 분석기로 승격하면 된다.
+
 ### 남은 것 / 다음
-- Phase 3: 도메인 Skills(성능·아키텍처·Unity 함정) — 산출물 "품질"을 강제.
+- Phase 4: `UgsTarget`(UGS Cloud Code 배포·호출 검증) — 클라 + 백엔드 풀스택.
 - 검증 확장: 시나리오 재생(다중 프레임), `run_tests`(테스트 러너), `get_performance_stats`(성능 예산).
