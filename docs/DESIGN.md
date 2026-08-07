@@ -202,11 +202,12 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 → 시스템 프롬프트 = **[루프의 형식 계약] + [손의 생성 규격] + [스킬의 품질 지침]** 으로 조립된다
 (`--print-prompt` 로 확인). 루프는 형식만 소유한다.
 
-**정직한 한계 — 호출 검증은 없다.**
+**정직한 한계 — 호출 검증은 (아직) 없다.**
 `ugs cloud-code scripts` 에는 create/publish/get/list/update/delete 만 있고 **invoke/run 이 없다.**
 그래서 이 타깃은 `Supports(PlayModeAssert) == false` 를 반환하고, 루프는 런타임 단계를 건너뛴다.
-없는 기능을 있는 척하지 않는다 — 호출까지 검증하려면 Cloud Code REST 엔드포인트를 플레이어 토큰으로
-직접 부르는 경로가 필요하고, 그건 다음 단계다.
+없는 기능을 있는 척하지 않는다.
+→ 호출까지 검증하는 경로는 **[docs/UGS-INVOKE-DESIGN.md](UGS-INVOKE-DESIGN.md)** 에 설계해 두었다
+(서비스 계정 → 토큰 교환 → Cloud Code Client API 호출 → 응답 부분일치 검증).
 
 **검증 범위(현재)**: 파일 적용 · `ugs deploy` 호출/결과 파싱 · 타깃별 프롬프트 조립 · 타깃별 스킬 필터 ·
 미인증 시 사전 차단까지 실측 확인. **실제 배포 성공 경로**는 서비스 계정 키가 필요해 사용자 설정 후 확인한다
