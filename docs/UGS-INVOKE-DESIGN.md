@@ -121,10 +121,15 @@ UGS 가 `true` 를 반환하는 순간 같은 흐름(①→①-b→②→③-a�
    → 생성 지침에 *"플레이어 식별자는 `context` 대신 `params` 로 받아 테스트 가능하게 하라"* 를 넣는다.
    (테스트 가능성을 위해 시간·입력을 인자로 받게 한 `Tick(float dt)` 와 같은 원리 — `client-architecture` 스킬)
 
-2. **배포 = 게시인가 — 미확인.**
-   `ugs cloud-code scripts publish` 가 별도 명령으로 존재한다. `ugs deploy` 가 publish 까지 하는지
-   확인해야 한다. 하지 않는다면 호출 전에 publish 단계를 넣어야 한다.
-   → 인증이 갖춰지면 `deploy` → `scripts get <name>` 으로 게시 상태를 확인해 결정한다.
+2. ~~**배포 = 게시인가 — 미확인.**~~ → **확정: `ugs deploy` 는 publish 까지 수행한다.**
+   실배포에서 `Status: Failed to Publish - Error calling PublishScript` 가 나온 것으로 확인했다
+   (배포 파이프라인이 read → deploy → **publish** 순으로 돈다).
+   → 루프에 별도 publish 단계를 넣을 필요가 없다.
+   단, **게시 권한은 `Cloud Code Editor` 와 별개**다. 편집 권한만으로는 `PublishScript` 가 403 이 난다.
+
+2-b. **서비스 필터 값 주의(실측).** `ugs deploy --services` 에는 `cloud-code` 가 아니라
+   **`cloud-code-scripts`** 를 줘야 한다. 잘못된 값이면 아무것도 배포하지 않고
+   "These service options were not recognized" 를 낸다. `--dry-run` 으로 먼저 확인하는 습관이 값을 했다.
 
 3. **토큰 만료(약 1시간).** 만료 시각을 보관하고 필요 시 재교환한다. 루프 한 번은 대개 1시간 미만이라
    초기 구현은 "실패 시 1회 재교환" 수준으로 충분하다.

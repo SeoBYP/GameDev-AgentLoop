@@ -105,7 +105,9 @@ public sealed class UgsTarget : IExecTarget
             throw new NotSupportedException(
                 $"UgsTarget 은 {spec.Kind} 을 지원하지 않습니다(`ugs` CLI 에 스크립트 호출 명령이 없습니다).");
 
-        var res = await RunUgsAsync(new[] { "deploy", _deployDir, "--services", "cloud-code" }, ct);
+        // 서비스 필터 값은 `cloud-code` 가 아니라 **`cloud-code-scripts`** 다(실측으로 확인).
+        // 잘못된 값을 주면 CLI 가 "No content deployed" 와 함께 인식 실패를 알린다.
+        var res = await RunUgsAsync(new[] { "deploy", _deployDir, "--services", "cloud-code-scripts" }, ct);
         var errors = ParseDeployErrors(res.StdOut, res.StdErr, res.ExitCode);
 
         return errors.Count == 0
