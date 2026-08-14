@@ -30,12 +30,14 @@ public sealed class UnityEditorTarget : IExecTarget
 
     public string Name => _label;
 
-    public bool Supports(VerifyKind kind) => kind is VerifyKind.Compile or VerifyKind.RuntimeAssert;
+    public bool Supports(VerifyKind kind) =>
+        kind is VerifyKind.Compile or VerifyKind.RuntimeAssert or VerifyKind.Performance;
 
     public string LabelFor(VerifyKind kind) => kind switch
     {
         VerifyKind.Compile => "컴파일",
         VerifyKind.RuntimeAssert => "플레이모드 assert",
+        VerifyKind.Performance => "성능 예산",
         _ => kind.ToString(),
     };
 
@@ -64,6 +66,22 @@ public sealed class UnityEditorTarget : IExecTarget
               `UnityEngine.Object.DestroyImmediate(go)` before returning.
             * Use fully qualified UnityEngine names. Do not use `using` directives.
             * No file I/O, no scene loading, no coroutines, no waiting across frames.
+
+        - Then emit EXACTLY ONE performance budget as:
+        PERF:
+        ```json
+        { "component": "<TypeName>", "call": "target.Tick(0.016f)", "iterations": 20000, "maxTotalMs": 12 }
+        ```
+          The loop builds the measurement itself: it creates the component in play mode, calls `call`
+          once to warm up, then times `iterations` repetitions and compares against `maxTotalMs`.
+          Rules:
+            * `call` must use the variable name `target` for the component instance.
+            * Choose the HOT PATH — the method that would run every frame (e.g. a `Tick(float)`),
+              not a one-off setup method. Prefer exposing frame work as a callable method.
+            * Optional `"setup"`: one statement run before measuring (e.g. `target.SetTarget(...)`).
+            * Budget guidance: allocation-free work is roughly 0.1µs/call on a desktop editor;
+              allocating per call is 5-10x slower. Pick a budget that a clean implementation
+              passes comfortably but a per-call-allocating one does not.
         """;
 
     public UnityEditorTarget(string unityExe, string projectPath, string label, int timeoutSec = 120)
@@ -107,6 +125,8 @@ public sealed class UnityEditorTarget : IExecTarget
         VerifyKind.Compile => VerifyCompileAsync(ct),
         VerifyKind.RuntimeAssert => VerifyPlayModeAsync(
             spec.AssertCode ?? throw new ArgumentException("RuntimeAssert 는 AssertCode 가 필요합니다.", nameof(spec)), ct),
+        VerifyKind.Performance => VerifyPerformanceAsync(
+            spec.AssertCode ?? throw new ArgumentException("Performance 는 PERF 명세가 필요합니다.", nameof(spec)), ct),
         _ => throw new NotSupportedException($"지원하지 않는 검증: {spec.Kind}"),
     };
 
@@ -166,6 +186,83 @@ public sealed class UnityEditorTarget : IExecTarget
         {
             // 검증이 실패하든 취소되든 에디터를 반드시 플레이모드에서 빼낸다(부작용 방지).
             await RunCommandAsync("editor_stop", CancellationToken.None);
+        }
+    }
+
+    // ── ③-c 성능 검증 (프로파일링) ──────────────────────────────────────────────
+    // "동작 정상 ≠ 충분히 빠름". 핫패스를 실제로 N회 돌려 경과 시간을 재고 예산과 비교한다.
+    // 측정 스니펫은 오케스트레이터(PerfHarness)가 만든다 — 백엔드는 무엇을 부를지와 예산만 선언한다.
+    private async Task<VerifyResult> VerifyPerformanceAsync(string perfJson, CancellationToken ct)
+    {
+        PerfSpec spec;
+        try
+        {
+            spec = PerfHarness.Parse(perfJson);
+        }
+        catch (Exception ex)
+        {
+            return new VerifyResult(false, perfJson, new[] { $"PERF 블록 해석 실패: {ex.Message}" });
+        }
+
+        await WaitUntilReadyAsync(ct);
+        if (!await EnterPlayModeAsync(ct))
+            throw new InvalidOperationException("플레이모드 진입 실패 — 성능 측정을 수행할 수 없습니다.");
+
+        try
+        {
+            var res = await RunCommandAsync("eval", ct, PerfHarness.BuildSnippet(spec));
+            var (ok, raw) = ParseEvalOutcome(res.StdOut);
+
+            if (!double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var elapsedMs))
+            {
+                return new VerifyResult(false, res.StdOut, new[] { $"성능 측정 실행 실패: {raw}" });
+            }
+
+            // 프로파일링 맥락(드로우콜·메모리·프레임타임)도 함께 남긴다 — 판정 기준은 아니지만 진단에 쓰인다.
+            var stats = await ReadPerformanceStatsAsync(ct);
+            var perCall = elapsedMs / spec.Iterations * 1000.0; // 마이크로초
+            var log = $"{spec.Component}: {spec.Iterations}회 {elapsedMs:F2}ms (호출당 {perCall:F2}µs)  {stats}";
+
+            return elapsedMs <= spec.MaxTotalMs
+                ? new VerifyResult(true, log, Array.Empty<string>())
+                : new VerifyResult(false, log, new[]
+                {
+                    $"성능 예산 초과 — {spec.Component} 를 {spec.Iterations}회 호출하는 데 " +
+                    $"{elapsedMs:F2}ms 걸렸습니다(예산 {spec.MaxTotalMs:F2}ms, 호출당 {perCall:F2}µs). " +
+                    "핫패스에서 매 호출 할당하거나 불필요한 작업을 하고 있지 않은지 확인하세요.",
+                });
+        }
+        finally
+        {
+            await RunCommandAsync("editor_stop", CancellationToken.None);
+        }
+    }
+
+    /// <summary>프로파일링 통계(드로우콜·메모리·프레임타임)를 한 줄로 요약한다.</summary>
+    private async Task<string> ReadPerformanceStatsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var res = await RunCommandAsync("get_performance_stats", ct);
+            using var doc = JsonDocument.Parse(res.StdOut.Trim());
+            if (!doc.RootElement.TryGetProperty("data", out var data) ||
+                !data.TryGetProperty("result", out var r))
+                return "";
+
+            var draws = r.TryGetProperty("render", out var render) &&
+                        render.TryGetProperty("drawCalls", out var dc) ? dc.ToString() : "?";
+            var mono = r.TryGetProperty("memory", out var mem) &&
+                       mem.TryGetProperty("monoUsedBytes", out var mu) && mu.TryGetInt64(out var b)
+                       ? $"{b / (1024.0 * 1024.0):F0}MB" : "?";
+            var cpu = r.TryGetProperty("frameTiming", out var ft) &&
+                      ft.TryGetProperty("cpuFrameTimeMs", out var cf) ? cf.ToString() : "?";
+
+            return $"[프로파일: drawCalls={draws} mono={mono} cpuFrame={cpu}ms]";
+        }
+        catch
+        {
+            return "";
         }
     }
 

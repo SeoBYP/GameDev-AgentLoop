@@ -121,19 +121,42 @@ public sealed class AgentLoop
             _log($"③ 검증  → {runtimeLabel} 실행 ({(_options.Assert is not null ? "사람 지정" : "AI 생성")})");
             var play = await _target.VerifyAsync(new VerifySpec(VerifyKind.RuntimeAssert, assertCode), ct);
 
-            // ⑤ 판정
-            if (play.Ok)
+            if (!play.Ok)
             {
-                _log($"③ 검증  → {runtimeLabel} 통과 ✅");
+                _log($"③ 검증  → {runtimeLabel} 실패 ❌");
+                foreach (var e in play.Errors.Take(3))
+                    _log($"      · {e}");
+
+                // ④ 피드백 → 다음 스텝 ①로
+                history.Add(new Turn(Role.User, BuildAssertFeedback(play.Errors)));
+                continue;
+            }
+            _log($"③ 검증  → {runtimeLabel} 통과 ✅");
+
+            // ③-c 검증: 성능 예산 (프로파일링) — "동작 정상 ≠ 충분히 빠름"
+            var perfSpec = _options.NoPerf ? null : EditParser.ParsePerf(reply.Text);
+            if (perfSpec is null || !_target.Supports(VerifyKind.Performance))
+            {
+                // ⑤ 판정
                 return new LoopResult(true, step, $"{step}스텝 만에 적용 + 런타임 동작 검증 통과");
             }
 
-            _log($"③ 검증  → {runtimeLabel} 실패 ❌");
-            foreach (var e in play.Errors.Take(3))
+            var perfLabel = _target.LabelFor(VerifyKind.Performance);
+            var perf = await _target.VerifyAsync(new VerifySpec(VerifyKind.Performance, perfSpec), ct);
+
+            // ⑤ 판정
+            if (perf.Ok)
+            {
+                _log($"③ 검증  → {perfLabel} 통과 ✅  {perf.Log}");
+                return new LoopResult(true, step, $"{step}스텝 만에 동작 + 성능까지 검증 통과");
+            }
+
+            _log($"③ 검증  → {perfLabel} 초과 ❌  {perf.Log}");
+            foreach (var e in perf.Errors.Take(3))
                 _log($"      · {e}");
 
             // ④ 피드백 → 다음 스텝 ①로
-            history.Add(new Turn(Role.User, BuildAssertFeedback(play.Errors)));
+            history.Add(new Turn(Role.User, BuildPerfFeedback(perf.Errors)));
         }
 
         return new LoopResult(false, _options.MaxSteps, $"maxSteps({_options.MaxSteps}) 초과 — 미해결");
@@ -200,6 +223,23 @@ public sealed class AgentLoop
 
             규칙을 지키도록 구현을 고쳐 전체 파일을 다시 출력하세요
             (예: Update 계열에서 쓰던 탐색/캐싱 대상은 Awake 또는 Start 에서 한 번만 확보해 필드에 보관).
+            """;
+    }
+
+    // 동작은 맞지만 성능 예산을 넘긴 경우의 피드백.
+    // "예산을 늘려라"가 아니라 "구현을 빠르게 고쳐라"를 명시한다.
+    private static string BuildPerfFeedback(IReadOnlyList<string> failures)
+    {
+        var list = string.Join("\n", failures.Select(e => "  - " + e));
+        return $"""
+            동작은 맞지만 **성능 예산을 초과**했습니다(실측):
+
+            {list}
+
+            핫패스에서 매 호출 발생하는 비용을 제거해 구현을 고치고 전체 파일을 다시 출력하세요.
+            흔한 원인: 매 호출 컬렉션/배열 새로 생성, 문자열 결합·보간, LINQ, 박싱, 매번 컴포넌트 탐색.
+            → 재사용 가능한 버퍼는 필드로 올리고, 탐색 결과는 Awake/Start 에서 캐싱하세요.
+            PERF 블록의 예산(maxTotalMs)을 늘려서 통과시키지 마세요 — 기준은 그대로 두고 구현을 고쳐야 합니다.
             """;
     }
 

@@ -18,6 +18,7 @@
  → ③ 검증   IExecTarget.VerifyAsync
        ③-a  컴파일       `recompile_status` 폴링 → 컴파일 에러?
        ③-b  런타임 동작   `editor_play` → `eval` 로 assert 실행 → `editor_stop`
+       ③-c  성능 예산     핫패스 N회 실행 시간 실측 + 프로파일 통계 → 예산 초과?
  → ④ 피드백  에러/실패 사유를 대화(History)에 추가해 백엔드로 되돌림
  → ⑤ 판정   둘 다 통과 → 종료 / 실패 → ①로  (maxSteps 가드, 기본 6)
 ```
@@ -86,6 +87,7 @@ dotnet run --project Orchestrator -- "간단한 HP 컴포넌트를 만들어줘"
 dotnet run --project Orchestrator -- --demo         # 컴파일 자가수리: 세미콜론 누락 → 에러 → 수리 → 통과
 dotnet run --project Orchestrator -- --demo-play    # 런타임 검증: 컴파일은 통과하나 동작이 틀린 코드 → 수리
 dotnet run --project Orchestrator -- --demo-skills  # 품질 강제: 도메인 규칙 위반 → 적용 거부 → 수리
+dotnet run --project Orchestrator -- --demo-perf    # 성능 실측: 동작은 맞으나 핫패스가 느린 코드 → 수리
 ```
 
 ### 도메인 스킬 — `--skills` / `--list-skills`
@@ -200,6 +202,36 @@ ASSERT 블록을 작성**하고 루프가 그걸 플레이모드에서 실행해
 | 프로퍼티 반복 접근 | `transform.position` 3회 읽음 | 지역 변수 캐싱 |
 | 상태 변화 통지 | 없음 | `event Action<Vector3> OnTargetChanged` |
 | 성공/실패 반환 | `void SetDestination(...)` | `bool SetTargetPosition(...)` + 입력 검증 |
+
+### 성능 프로파일링 — "동작 정상 ≠ 충분히 빠름" (`--demo-perf`)
+
+동작 검증까지 통과한 코드도 **핫패스에서 매 호출 할당하면** 게임에선 실패다.
+Phase 3 스킬이 이를 *정적으로 추측*한다면, 이 단계는 **실측**한다:
+
+```
+step 1  ③ 검증 → 컴파일 통과 ✅
+        ③ 검증 → 플레이모드 assert 통과 ✅        ← 동작은 정확하다
+        ③ 검증 → 성능 예산 초과 ❌  ScoreTracker: 50000회 41.03ms (호출당 0.82µs)
+                                    [프로파일: drawCalls=24 mono=943MB cpuFrame=2.55ms]
+step 2  ③ 검증 → 성능 예산 통과 ✅  ScoreTracker: 50000회 11.82ms (호출당 0.24µs)
+
+✅ 성공 — 2스텝 만에 동작 + 성능까지 검증 통과
+```
+
+**측정 하네스는 오케스트레이터가 소유한다**(`PerfHarness`). 백엔드는 *무엇을 얼마나 부를지와 예산*만
+`PERF` 블록으로 선언하고, 워밍업·타이머·정리 코드는 루프가 만든다 —
+생성자가 자기 벤치마크를 느슨하게 써서 통과시키는 걸 막기 위해서다.
+피드백에도 *"예산을 늘리지 말고 구현을 고쳐라"* 를 명시한다.
+
+> **왜 시간으로 재나 (실측 근거)**: Unity Mono 는 Boehm GC(세대 없음)라
+> `GC.CollectionCount`/`GetTotalAllocatedBytes` 가 없거나 항상 0 이고, `GetTotalMemory` 도 힙 크기라
+> 수집이 따라잡으면 0 으로 보인다. 반면 **시간은 안정적으로 드러난다** —
+> 같은 일을 하는 두 구현을 5만 회 돌렸을 때 무할당 4.8ms vs 매 호출 할당 30.2ms(6배).
+> 할당 비용과 GC 압력이 결국 시간에 반영된다.
+>
+> **한계(정직히)**: 절대 ms 예산은 기기 성능에 의존한다. 프로파일링의 본질적 성격이며,
+> 데모는 양쪽(41ms / 11.8ms)에 충분한 마진을 두고 예산(25ms)을 잡았다.
+> 처음엔 12ms 로 잡았다가 같은 코드가 13.9ms↔11.9ms 로 흔들려 플래키했고, 그 경험으로 마진을 넓혔다.
 
 ### agent-agnostic — Codex 도 같은 루프로
 

@@ -46,6 +46,12 @@ public enum VerifyKind
 {
     Compile,
     RuntimeAssert,
+
+    /// <summary>
+    /// 성능 예산을 지키는가(Phase 5). 동작이 맞아도 핫패스에서 할당하거나 느리면 게임에선 실패다.
+    /// Phase 3 스킬이 "Update 에서 할당하지 마라"를 **정적으로 추측**한다면, 이건 **실측**한다.
+    /// </summary>
+    Performance,
 }
 
 /// <summary>

@@ -11,6 +11,9 @@ public sealed record LoopOptions
     /// AI 가 자기 코드를 자기 기준으로 채점하는 것을 막고 싶을 때 쓰는 권위 있는 검증 기준.
     /// </summary>
     public string? Assert { get; init; }
+
+    /// <summary>성능 검증(③-c)을 끄고 동작 검증까지만 본다(대조·디버깅용).</summary>
+    public bool NoPerf { get; init; }
 }
 
 /// <summary>루프 종료 판정 결과.</summary>

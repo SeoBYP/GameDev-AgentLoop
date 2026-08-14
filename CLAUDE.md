@@ -69,5 +69,12 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
   시스템 프롬프트 = [루프 형식] + [손의 규격] + [스킬 지침] (`--print-prompt` 로 확인). 스킬은 `targets:` 로 타깃 필터.
   - **한계(정직히)**: `ugs` CLI 에 스크립트 호출 명령이 없어 배포까지만 검증(`Supports(PlayModeAssert)==false`).
   - **미실측**: 실제 배포 성공 경로 — 서비스 계정 키(사용자가 `ugs login`) 필요. 비밀키는 다루지 않는다.
-- 다음: UGS 실배포 실측 → Cloud Code REST 호출 검증.
+- **Phase 4 완료** — 실제 UGS 프로젝트(GameDevAgentLoop/production)로 배포 + REST 호출 검증 관통.
+  자격은 `.env`(UGS_CLI_SERVICE_KEY_ID/SECRET, gitignore 보호). 역할은 Cloud Code **Publisher**+Editor 필요.
+  함정: `--services cloud-code-scripts` / `module.exports.params` 미선언 시 파라미터 걸러짐 / `env list` 는 `--environment-name` 거부.
+- **Phase 5 완료** — 성능 프로파일링 검증(③-c). `PERF:` 블록 + `PerfHarness`(하네스는 루프 소유).
+  Unity Mono 는 Boehm GC 라 `GC.*` 할당 측정 API 가 무용 → **시간으로 측정**(무할당 4.8ms vs 할당 30.2ms/5만회).
+  `--demo-perf`: 동작은 맞지만 핫패스 할당 → 41ms 초과 → 수리 → 11.8ms 통과.
+  절대 ms 예산은 기기 의존적 → 마진 넓게(12ms 로 잡았다 플래키해서 25ms 로 조정).
+- 다음: 시나리오 재생(다중 프레임), `run_tests` 연동, 드로우콜·메모리 예산 승격.
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

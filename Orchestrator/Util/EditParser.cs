@@ -39,6 +39,22 @@ public static partial class EditParser
         return body.Length == 0 ? null : body;
     }
 
+    // PERF: 다음 줄에 오는 펜스 블록 = 성능 예산 명세(JSON).
+    [GeneratedRegex(
+        @"PERF:[ \t]*\r?\n```[^\r\n]*\r?\n(?<body>.*?)\r?\n```",
+        RegexOptions.Singleline)]
+    private static partial Regex PerfBlockRegex();
+
+    /// <summary>응답에서 PERF 블록(성능 예산 명세)을 뽑는다. 없으면 null.</summary>
+    public static string? ParsePerf(string text)
+    {
+        var m = PerfBlockRegex().Match(text);
+        if (!m.Success)
+            return null;
+        var body = m.Groups["body"].Value.Trim();
+        return body.Length == 0 ? null : body;
+    }
+
     public static IReadOnlyList<FileEdit> Parse(string text)
     {
         var edits = new List<FileEdit>();

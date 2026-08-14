@@ -97,6 +97,10 @@ else if (opts.DemoSkills)
 {
     backend = new ScriptedBackend(DemoScript.SkillViolationThenFixed);
 }
+else if (opts.DemoPerf)
+{
+    backend = new ScriptedBackend(DemoScript.CorrectButSlowThenFast);
+}
 else if (opts.Claude)
 {
     // "이 AI 채팅"(Claude Code CLI)을 두뇌로 — 별도 API 키 불필요(CLI 로그인만).
@@ -145,6 +149,7 @@ var loop = new AgentLoop(
     {
         MaxSteps = opts.MaxSteps,
         Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
+        NoPerf = opts.NoPerf,
     },
     selectedSkills);
 
@@ -184,6 +189,8 @@ static Options ParseArgs(string[] args)
             case "--demo": o.Demo = true; break;
             case "--demo-play": o.DemoPlay = true; break;
             case "--demo-skills": o.DemoSkills = true; break;
+            case "--demo-perf": o.DemoPerf = true; break;
+            case "--no-perf": o.NoPerf = true; break;
             case "--claude": o.Claude = true; break;
             case "--codex": o.Codex = true; break;
             case "--assert" when i + 1 < args.Length: o.Assert = args[++i]; break;
@@ -214,6 +221,8 @@ static Options ParseArgs(string[] args)
             o.Goal = "스태미나 컴포넌트를 만들어줘. Use(int)/Recover(int) 를 갖고, 값은 0~Max 를 벗어나지 않는다.";
         else if (o.DemoSkills)
             o.Goal = "대상을 따라가는 Follower 컴포넌트를 만들어줘. 속도와 대상은 인스펙터에서 설정한다.";
+        else if (o.DemoPerf)
+            o.Goal = "점수를 기록하는 ScoreTracker 컴포넌트를 만들어줘. Record(int) 는 매 프레임 불릴 수 있다.";
     }
     return o;
 }
@@ -263,6 +272,8 @@ sealed class Options
     public bool Demo { get; set; }
     public bool DemoPlay { get; set; }
     public bool DemoSkills { get; set; }
+    public bool DemoPerf { get; set; }
+    public bool NoPerf { get; set; }
     public bool Claude { get; set; }
     public bool Codex { get; set; }
     public string? Assert { get; set; }
@@ -472,6 +483,108 @@ static class DemoScript
         bool has = f.HasTarget;
         UnityEngine.Object.DestroyImmediate(go);
         return has ? "target 이 없는데 HasTarget 이 true 입니다." : "OK";
+        ```
+        """,
+    };
+
+    // --demo-perf 스크립트: **동작은 맞지만 느린** 코드를 성능 실측이 잡아낸다.
+    // step 1) 결과는 정확하지만 매 호출 List 를 새로 만들고 문자열을 조립한다 → 컴파일·런타임 assert 통과, 성능 초과.
+    // step 2) 버퍼 재사용 + 문자열 제거 → 예산 통과.
+    // "동작 정상 ≠ 충분히 빠름" — Phase 3 의 정적 추측과 달리 **측정으로** 잡는다는 게 핵심.
+    public static readonly IReadOnlyList<string> CorrectButSlowThenFast = new[]
+    {
+        // step 1 — 정답은 맞지만 핫패스에서 매 호출 할당.
+        """
+        FILE: Assets/Scripts/ScoreTracker.cs
+        ```csharp
+        using System.Collections.Generic;
+        using UnityEngine;
+
+        public class ScoreTracker : MonoBehaviour
+        {
+            [SerializeField] private int _window = 16;
+
+            public int Total { get; private set; }
+
+            public void Record(int score)
+            {
+                var buffer = new List<int>();
+                for (int i = 0; i < _window; i++)
+                {
+                    buffer.Add(score + i);
+                }
+
+                int sum = 0;
+                foreach (var v in buffer)
+                {
+                    sum += v;
+                }
+
+                var label = "score:" + sum;
+                Total = sum + label.Length - label.Length;
+            }
+        }
+        ```
+        ASSERT:
+        ```csharp
+        var go = new UnityEngine.GameObject();
+        var t = go.AddComponent<ScoreTracker>();
+        t.Record(10);
+        int total = t.Total;
+        UnityEngine.Object.DestroyImmediate(go);
+        return total == 280 ? "OK" : ("Record(10) 후 Total 은 280 이어야 하는데 " + total + " 였습니다.");
+        ```
+        PERF:
+        ```json
+        { "component": "ScoreTracker", "call": "target.Record(10)", "iterations": 50000, "maxTotalMs": 25 }
+        ```
+        """,
+
+        // step 2 — 버퍼 재사용 + 문자열 제거로 동일 결과를 무할당으로.
+        """
+        FILE: Assets/Scripts/ScoreTracker.cs
+        ```csharp
+        using System.Collections.Generic;
+        using UnityEngine;
+
+        public class ScoreTracker : MonoBehaviour
+        {
+            [SerializeField] private int _window = 16;
+
+            private readonly List<int> _buffer = new List<int>(64);
+
+            public int Total { get; private set; }
+
+            public void Record(int score)
+            {
+                _buffer.Clear();
+                for (int i = 0; i < _window; i++)
+                {
+                    _buffer.Add(score + i);
+                }
+
+                int sum = 0;
+                for (int i = 0; i < _buffer.Count; i++)
+                {
+                    sum += _buffer[i];
+                }
+
+                Total = sum;
+            }
+        }
+        ```
+        ASSERT:
+        ```csharp
+        var go = new UnityEngine.GameObject();
+        var t = go.AddComponent<ScoreTracker>();
+        t.Record(10);
+        int total = t.Total;
+        UnityEngine.Object.DestroyImmediate(go);
+        return total == 280 ? "OK" : ("Record(10) 후 Total 은 280 이어야 하는데 " + total + " 였습니다.");
+        ```
+        PERF:
+        ```json
+        { "component": "ScoreTracker", "call": "target.Record(10)", "iterations": 50000, "maxTotalMs": 25 }
         ```
         """,
     };
