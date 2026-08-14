@@ -28,12 +28,11 @@ public sealed class UgsTarget : IExecTarget
     private readonly string _projectRoot;
     private readonly string _deployDir;      // Cloud Code 스크립트를 모아 두는 폴더(배포 단위)
     private readonly string? _projectId;
-    private readonly string? _environment;
+    private readonly string? _environment;     // 환경 "이름" (예: production)
+    private string? _environmentId;            // 환경 "ID"(UUID) — 토큰 교환에 필요. 필요 시 해석해 캐시한다.
     private readonly int _timeoutSec;
 
     public string Name => _projectId is null ? "ugs:cloud-code" : $"ugs:{_projectId[..8]}…";
-
-    public string VerifyLabel => "배포";
 
     public string ConnectionHint =>
         "UGS 인증 또는 프로젝트 설정이 되어 있지 않습니다.\n" +
@@ -42,15 +41,44 @@ public sealed class UgsTarget : IExecTarget
         "  2) 프로젝트 지정:        --ugs-project-id <id>  (또는 ugs config set project-id <id>)\n" +
         "  3) 환경 지정(선택):      --ugs-env production";
 
-    // CLI 에 호출 명령이 없으므로 런타임 assert 는 지원하지 않는다.
-    public bool Supports(VerifyKind kind) => kind is VerifyKind.Compile;
+    // 배포는 항상, 호출 검증은 **자격 증명이 있을 때만** 지원한다.
+    // (`ugs` CLI 에는 호출 명령이 없어 REST 로 직접 부른다 — UgsInvoker)
+    public bool Supports(VerifyKind kind) => kind switch
+    {
+        VerifyKind.Compile => true,
+        VerifyKind.RuntimeAssert => HasInvokeCredentials,
+        _ => false,
+    };
 
-    public UgsTarget(string projectRoot, string deployDir, string? projectId, string? environment, int timeoutSec = 180)
+    private static bool HasInvokeCredentials
+    {
+        get
+        {
+            var (id, secret) = UgsInvoker.ReadCredentials();
+            return !string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(secret);
+        }
+    }
+
+    public string LabelFor(VerifyKind kind) => kind switch
+    {
+        VerifyKind.Compile => "배포",
+        VerifyKind.RuntimeAssert => "스크립트 호출",
+        _ => kind.ToString(),
+    };
+
+    public UgsTarget(
+        string projectRoot,
+        string deployDir,
+        string? projectId,
+        string? environment,
+        string? environmentId = null,
+        int timeoutSec = 180)
     {
         _projectRoot = projectRoot;
         _deployDir = deployDir;
         _projectId = projectId;
         _environment = environment;
+        _environmentId = environmentId;
         _timeoutSec = timeoutSec;
     }
 
@@ -67,9 +95,34 @@ public sealed class UgsTarget : IExecTarget
             return { /* JSON-serializable result */ };
           };
 
+        - **You MUST declare every parameter**, or Cloud Code strips it and `params` arrives empty
+          (the script then deploys fine but behaves wrong). Assign `module.exports` FIRST, then:
+
+          module.exports.params = {
+            streak: { type: "Numeric", required: true },
+            playerName: { type: "String" },
+          };
+
+          Valid types: "Numeric", "String", "Boolean", "JSON", "Any".
+        - Take identifiers such as a player id as an explicit PARAM, not from `context`:
+          verification calls the script as a trusted client, so `context.playerId` is not available.
         - Use only libraries Cloud Code provides (e.g. `require("lodash-4.17")`). No filesystem, no native modules.
         - Validate inputs and return a clear error result instead of throwing on bad params.
-        - Do NOT emit an ASSERT block: this target verifies by deploying to UGS, not by running locally.
+
+        - After the FILE blocks, emit EXACTLY ONE runtime check as a JSON array:
+        ASSERT:
+        ```json
+        [
+          { "script": "<scriptName>", "params": { ... }, "expect": { ... } },
+          { "script": "<scriptName>", "params": { ... }, "expectError": true }
+        ]
+        ```
+          Each case invokes the DEPLOYED script over the Cloud Code REST API and checks the response.
+          Rules:
+            * "script" is the file name without .js.
+            * "expect" is matched as a SUBSET of the script's returned object — list only the keys that matter.
+            * "expectError": true means the call itself must fail (use for invalid input at the platform level).
+            * Cover the edge cases the goal implies (bounds, clamping, invalid input), not just the happy path.
         """;
 
     private string RelativeDeployDir =>
@@ -98,13 +151,19 @@ public sealed class UgsTarget : IExecTarget
         return new ApplyResult(true, $"{written.Count}개 파일 적용: {string.Join(", ", written)}");
     }
 
-    // ── ③ 검증 = 배포 ─────────────────────────────────────────────────────────
-    public async Task<VerifyResult> VerifyAsync(VerifySpec spec, CancellationToken ct)
+    // ── ③ 검증 ────────────────────────────────────────────────────────────────
+    public Task<VerifyResult> VerifyAsync(VerifySpec spec, CancellationToken ct) => spec.Kind switch
     {
-        if (spec.Kind != VerifyKind.Compile)
-            throw new NotSupportedException(
-                $"UgsTarget 은 {spec.Kind} 을 지원하지 않습니다(`ugs` CLI 에 스크립트 호출 명령이 없습니다).");
+        VerifyKind.Compile => VerifyDeployAsync(ct),
+        VerifyKind.RuntimeAssert => VerifyInvokeAsync(
+            spec.AssertCode ?? throw new ArgumentException("RuntimeAssert 는 AssertCode 가 필요합니다.", nameof(spec)), ct),
+        _ => throw new NotSupportedException($"지원하지 않는 검증: {spec.Kind}"),
+    };
 
+    // ── ③-a 배포 검증 ─────────────────────────────────────────────────────────
+    // `ugs deploy` 는 publish 까지 수행한다(실측 확인) — 별도 게시 단계가 필요 없다.
+    private async Task<VerifyResult> VerifyDeployAsync(CancellationToken ct)
+    {
         // 서비스 필터 값은 `cloud-code` 가 아니라 **`cloud-code-scripts`** 다(실측으로 확인).
         // 잘못된 값을 주면 CLI 가 "No content deployed" 와 함께 인식 실패를 알린다.
         var res = await RunUgsAsync(new[] { "deploy", _deployDir, "--services", "cloud-code-scripts" }, ct);
@@ -113,6 +172,69 @@ public sealed class UgsTarget : IExecTarget
         return errors.Count == 0
             ? new VerifyResult(true, res.StdOut, Array.Empty<string>())
             : new VerifyResult(false, res.StdOut + res.StdErr, errors);
+    }
+
+    // ── ③-b 호출 검증 ─────────────────────────────────────────────────────────
+    // 배포된 스크립트를 실제로 불러 응답을 확인한다. "배포 성공 ≠ 동작 정상"을 메우는 단계.
+    private async Task<VerifyResult> VerifyInvokeAsync(string assertJson, CancellationToken ct)
+    {
+        var (keyId, secret) = UgsInvoker.ReadCredentials();
+        if (string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(secret))
+        {
+            // 인프라 문제는 모델 탓이 아니므로 피드백하지 않고 중단시킨다.
+            throw new InvalidOperationException(
+                "호출 검증에는 UGS_CLI_SERVICE_KEY_ID / UGS_CLI_SERVICE_SECRET_KEY 가 필요합니다(.env 참고).");
+        }
+
+        var projectId = _projectId ?? throw new InvalidOperationException("UGS 프로젝트 ID 가 지정되지 않았습니다.");
+        var environmentId = await ResolveEnvironmentIdAsync(ct)
+            ?? throw new InvalidOperationException($"환경 ID 를 찾지 못했습니다(환경 이름: {_environment ?? "production"}).");
+
+        using var invoker = new UgsInvoker(projectId, environmentId, keyId!, secret!);
+        var failures = await invoker.VerifyAsync(assertJson, ct);
+
+        return failures.Count == 0
+            ? new VerifyResult(true, "", Array.Empty<string>())
+            : new VerifyResult(false, "", failures);
+    }
+
+    // 토큰 교환에는 환경 **ID**(UUID)가 필요한데 사용자는 보통 이름("production")만 안다.
+    // 인자로 받았으면 그대로 쓰고, 아니면 `ugs env list --json` 으로 이름→ID 를 해석한다.
+    private async Task<string?> ResolveEnvironmentIdAsync(CancellationToken ct)
+    {
+        if (_environmentId is not null)
+            return _environmentId;
+
+        var wanted = _environment ?? "production";
+        var res = await RunUgsAsync(new[] { "env", "list" }, ct, withEnvironment: false);
+
+        try
+        {
+            var json = ExtractJsonArray(res.StdOut);
+            if (json is null)
+                return null;
+
+            using var doc = JsonDocument.Parse(json);
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                if (e.TryGetProperty("name", out var n) &&
+                    string.Equals(n.GetString(), wanted, StringComparison.OrdinalIgnoreCase) &&
+                    e.TryGetProperty("id", out var id))
+                {
+                    _environmentId = id.GetString();
+                    return _environmentId;
+                }
+            }
+        }
+        catch { /* 아래에서 null 반환 */ }
+        return null;
+    }
+
+    private static string? ExtractJsonArray(string stdout)
+    {
+        var start = stdout.IndexOf('[');
+        var end = stdout.LastIndexOf(']');
+        return start >= 0 && end > start ? stdout[start..(end + 1)] : null;
     }
 
     /// <summary>배포 전 사전 점검: 인증·프로젝트 설정이 됐는지. 안 되어 있으면 AI 호출 전에 빠르게 실패시킨다.</summary>
@@ -138,7 +260,12 @@ public sealed class UgsTarget : IExecTarget
     }
 
     // ── ugs CLI 호출 ──────────────────────────────────────────────────────────
-    private Task<ProcessResult> RunUgsAsync(IEnumerable<string> args, CancellationToken ct)
+    // 주의: 명령마다 받는 플래그가 다르다. `env list` 는 --environment-name 을 모르며,
+    // 주면 실행 대신 도움말을 뱉는다(실측). 그래서 환경 플래그는 필요한 명령에만 붙인다.
+    private Task<ProcessResult> RunUgsAsync(
+        IEnumerable<string> args,
+        CancellationToken ct,
+        bool withEnvironment = true)
     {
         var list = new List<string>(args);
         if (_projectId is not null)
@@ -146,7 +273,7 @@ public sealed class UgsTarget : IExecTarget
             list.Add("--project-id");
             list.Add(_projectId);
         }
-        if (_environment is not null)
+        if (withEnvironment && _environment is not null)
         {
             list.Add("--environment-name");
             list.Add(_environment);

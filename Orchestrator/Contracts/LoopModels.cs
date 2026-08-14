@@ -39,17 +39,17 @@ public record ApplyResult(bool Ok, string Message);
 /// <summary>
 /// 검증 종류.
 ///   Compile        — 컴파일이 통과하는가(Phase 1).
-///   PlayModeAssert — 플레이모드에서 실제로 의도대로 동작하는가(Phase 2).
-/// 컴파일은 통과하지만 동작이 틀린 코드를 잡아내는 게 PlayModeAssert 의 존재 이유다.
+///   RuntimeAssert — 플레이모드에서 실제로 의도대로 동작하는가(Phase 2).
+/// 컴파일은 통과하지만 동작이 틀린 코드를 잡아내는 게 RuntimeAssert 의 존재 이유다.
 /// </summary>
 public enum VerifyKind
 {
     Compile,
-    PlayModeAssert,
+    RuntimeAssert,
 }
 
 /// <summary>
-/// 검증 요청. <paramref name="AssertCode"/> 는 PlayModeAssert 일 때만 쓰인다 —
+/// 검증 요청. <paramref name="AssertCode"/> 는 RuntimeAssert 일 때만 쓰인다 —
 /// 플레이모드에서 `unity command eval` 로 실행되는 C# 스니펫으로,
 /// 통과 시 "OK", 실패 시 사유 문자열을 return 한다.
 /// </summary>

@@ -20,8 +20,11 @@ public interface IExecTarget
     /// <summary>이 타깃이 해당 검증을 지원하는가(예: UGS 는 CLI 에 호출 명령이 없어 런타임 assert 미지원).</summary>
     bool Supports(VerifyKind kind);
 
-    /// <summary>1차 검증(<see cref="VerifyKind.Compile"/>)의 이름 — Unity 는 "컴파일", UGS 는 "배포".</summary>
-    string VerifyLabel { get; }
+    /// <summary>
+    /// 검증 종류의 사람이 읽을 이름 — 같은 <see cref="VerifyKind"/> 라도 손마다 하는 일이 다르다.
+    /// Compile: Unity "컴파일" / UGS "배포".  RuntimeAssert: Unity "플레이모드 assert" / UGS "스크립트 호출".
+    /// </summary>
+    string LabelFor(VerifyKind kind);
 
     /// <summary>
     /// 손이 준비됐는지 사전 점검(에디터가 떠 있나 / UGS 인증·프로젝트가 설정됐나).

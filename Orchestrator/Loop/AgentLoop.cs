@@ -97,7 +97,7 @@ public sealed class AgentLoop
             var verify = await _target.VerifyAsync(new VerifySpec(VerifyKind.Compile), ct);
             if (!verify.Ok)
             {
-                _log($"③ 검증  → {_target.VerifyLabel} 에러 {verify.Errors.Count}건 ❌");
+                _log($"③ 검증  → {_target.LabelFor(VerifyKind.Compile)} 에러 {verify.Errors.Count}건 ❌");
                 foreach (var e in verify.Errors.Take(5))
                     _log($"      · {e}");
 
@@ -105,29 +105,30 @@ public sealed class AgentLoop
                 history.Add(new Turn(Role.User, BuildErrorFeedback(verify.Errors)));
                 continue;
             }
-            _log($"③ 검증  → {_target.VerifyLabel} 통과 ✅");
+            _log($"③ 검증  → {_target.LabelFor(VerifyKind.Compile)} 통과 ✅");
 
             // ③-b 검증: 플레이모드 런타임 assert (있을 때만)
             // 사람이 준 assert(_options.Assert)가 백엔드가 낸 ASSERT 블록보다 우선한다.
             var assertCode = _options.Assert ?? EditParser.ParseAssert(reply.Text);
-            if (assertCode is null || !_target.Supports(VerifyKind.PlayModeAssert))
+            if (assertCode is null || !_target.Supports(VerifyKind.RuntimeAssert))
             {
                 // ⑤ 판정 — 런타임 기준이 없거나 타깃이 런타임 검증을 지원하지 않으면 여기까지가 성공 기준.
                 var why = assertCode is null ? "런타임 assert 없음" : "타깃이 런타임 검증 미지원";
                 return new LoopResult(true, step, $"{step}스텝 만에 적용·검증 통과 ({why})");
             }
 
-            _log($"③ 검증  → 플레이모드 진입, 런타임 assert 실행 ({(_options.Assert is not null ? "사람 지정" : "AI 생성")})");
-            var play = await _target.VerifyAsync(new VerifySpec(VerifyKind.PlayModeAssert, assertCode), ct);
+            var runtimeLabel = _target.LabelFor(VerifyKind.RuntimeAssert);
+            _log($"③ 검증  → {runtimeLabel} 실행 ({(_options.Assert is not null ? "사람 지정" : "AI 생성")})");
+            var play = await _target.VerifyAsync(new VerifySpec(VerifyKind.RuntimeAssert, assertCode), ct);
 
             // ⑤ 판정
             if (play.Ok)
             {
-                _log("③ 검증  → 플레이모드 assert 통과 ✅");
-                return new LoopResult(true, step, $"{step}스텝 만에 컴파일 + 런타임 동작 검증 통과");
+                _log($"③ 검증  → {runtimeLabel} 통과 ✅");
+                return new LoopResult(true, step, $"{step}스텝 만에 적용 + 런타임 동작 검증 통과");
             }
 
-            _log("③ 검증  → 플레이모드 assert 실패 ❌");
+            _log($"③ 검증  → {runtimeLabel} 실패 ❌");
             foreach (var e in play.Errors.Take(3))
                 _log($"      · {e}");
 
@@ -170,11 +171,12 @@ public sealed class AgentLoop
              + (guidance.Length == 0 ? string.Empty : "\n\n" + guidance);
     }
 
+    // 목표만 전달한다. 어떤 언어로 어디에 만들지는 타깃의 GenerationBrief 가 이미 시스템 프롬프트에 넣었다.
     private static string BuildInitialPrompt(string goal) =>
-        $"목표: {goal}\n\n위 목표를 만족하는 Unity C# 파일을 출력 계약(FILE: + ```csharp 펜스) 형식으로 생성하세요.";
+        $"목표: {goal}\n\n위 목표를 만족하는 파일을 출력 계약(FILE: + 펜스 코드블록) 형식으로 생성하세요.";
 
     private const string NoEditsFeedback =
-        "응답에서 FILE 블록을 하나도 찾지 못했습니다. 반드시 'FILE: <경로>' 다음 줄에 ```csharp 펜스로 전체 파일을 출력하세요.";
+        "응답에서 FILE 블록을 하나도 찾지 못했습니다. 반드시 'FILE: <경로>' 다음 줄에 펜스 코드블록으로 전체 파일을 출력하세요.";
 
     private static string BuildErrorFeedback(IReadOnlyList<string> errors)
     {

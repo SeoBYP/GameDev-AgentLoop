@@ -30,9 +30,14 @@ public sealed class UnityEditorTarget : IExecTarget
 
     public string Name => _label;
 
-    public bool Supports(VerifyKind kind) => kind is VerifyKind.Compile or VerifyKind.PlayModeAssert;
+    public bool Supports(VerifyKind kind) => kind is VerifyKind.Compile or VerifyKind.RuntimeAssert;
 
-    public string VerifyLabel => "컴파일";
+    public string LabelFor(VerifyKind kind) => kind switch
+    {
+        VerifyKind.Compile => "컴파일",
+        VerifyKind.RuntimeAssert => "플레이모드 assert",
+        _ => kind.ToString(),
+    };
 
     public string ConnectionHint =>
         "Unity pipeline 서버에 연결할 수 없습니다.\n" +
@@ -100,8 +105,8 @@ public sealed class UnityEditorTarget : IExecTarget
     public Task<VerifyResult> VerifyAsync(VerifySpec spec, CancellationToken ct) => spec.Kind switch
     {
         VerifyKind.Compile => VerifyCompileAsync(ct),
-        VerifyKind.PlayModeAssert => VerifyPlayModeAsync(
-            spec.AssertCode ?? throw new ArgumentException("PlayModeAssert 는 AssertCode 가 필요합니다.", nameof(spec)), ct),
+        VerifyKind.RuntimeAssert => VerifyPlayModeAsync(
+            spec.AssertCode ?? throw new ArgumentException("RuntimeAssert 는 AssertCode 가 필요합니다.", nameof(spec)), ct),
         _ => throw new NotSupportedException($"지원하지 않는 검증: {spec.Kind}"),
     };
 

@@ -64,7 +64,8 @@ if (opts.Target.Equals("ugs", StringComparison.OrdinalIgnoreCase))
     // 프로젝트/환경은 인자 → 환경변수(.env 포함) 순으로 해석한다.
     var ugsProjectId = opts.UgsProjectId ?? Environment.GetEnvironmentVariable("UGS_CLI_PROJECT_ID");
     var ugsEnv = opts.UgsEnvironment ?? Environment.GetEnvironmentVariable("UGS_CLI_ENVIRONMENT_NAME");
-    target = new UgsTarget(projectPath, deployDir, ugsProjectId, ugsEnv);
+    var ugsEnvId = opts.UgsEnvironmentId ?? Environment.GetEnvironmentVariable("UGS_CLI_ENVIRONMENT_ID");
+    target = new UgsTarget(projectPath, deployDir, ugsProjectId, ugsEnv, ugsEnvId);
 }
 else
 {
@@ -75,7 +76,7 @@ else
 // 1-d) 조립된 시스템 프롬프트만 보고 끝내기(디버깅/설명용) — 인증 없이도 타깃별 규격을 확인할 수 있다.
 if (opts.PrintPrompt)
 {
-    Console.WriteLine($"# 타깃: {target.Name}   런타임 검증 지원: {target.Supports(VerifyKind.PlayModeAssert)}");
+    Console.WriteLine($"# 타깃: {target.Name}   런타임 검증 지원: {target.Supports(VerifyKind.RuntimeAssert)}");
     Console.WriteLine($"# 스킬: {(selectedSkills.Count == 0 ? "없음" : string.Join(", ", selectedSkills.Select(s => s.Name)))}");
     Console.WriteLine(new string('─', 70));
     Console.WriteLine(AgentLoop.BuildSystemPrompt(target, selectedSkills));
@@ -194,6 +195,7 @@ static Options ParseArgs(string[] args)
             case "--target" when i + 1 < args.Length: o.Target = args[++i]; break;
             case "--ugs-project-id" when i + 1 < args.Length: o.UgsProjectId = args[++i]; break;
             case "--ugs-env" when i + 1 < args.Length: o.UgsEnvironment = args[++i]; break;
+            case "--ugs-env-id" when i + 1 < args.Length: o.UgsEnvironmentId = args[++i]; break;
             case "--cloud-code-dir" when i + 1 < args.Length: o.CloudCodeDir = args[++i]; break;
             case "--max-steps" when i + 1 < args.Length: o.MaxSteps = int.Parse(args[++i]); break;
             case "--project" when i + 1 < args.Length: o.ProjectPath = args[++i]; break;
@@ -272,6 +274,7 @@ sealed class Options
     public string Target { get; set; } = "unity";   // unity | ugs
     public string? UgsProjectId { get; set; }
     public string? UgsEnvironment { get; set; }
+    public string? UgsEnvironmentId { get; set; }
     public string? CloudCodeDir { get; set; }
     public string? ProjectPath { get; set; }
     // 백엔드별 기본값이 달라 nullable(ApiBackend→claude-opus-5, ClaudeCodeBackend→sonnet).

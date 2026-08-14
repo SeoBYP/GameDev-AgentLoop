@@ -139,8 +139,35 @@ UGS 가 `true` 를 반환하는 순간 같은 흐름(①→①-b→②→③-a�
 
 ---
 
-## 7. 완료 기준
+## 7. 완료 기준 — ✅ 달성
 
 - `--target ugs` 로 목표를 주면: Cloud Code JS 생성 → 배포 → **실제 호출** → 응답 부분일치 검증까지 통과.
-- 일부러 로직을 틀리게 한 스크립트가 **배포는 통과하지만 호출 검증에서 잡히는** 것을 실측으로 보인다
-  (Unity 쪽 `--demo-play` 와 같은 대조 — "배포 성공 ≠ 동작 정상").
+  → **실측 완료**(2026-08). 레벨업 보상 스크립트를 **1스텝**에 생성·배포·호출 검증까지 통과했고,
+  배포된 스크립트를 REST 로 독립 재확인했다(`level=60 → 3000`, `level=100 → 3000` 클램프, `level=0 → 거부`).
+
+```
+① 생성  → 파일 편집 1개
+② 적용  → 1개 파일 적용: CloudCode/levelUpReward.js
+③ 검증  → 배포 통과 ✅
+③ 검증  → 스크립트 호출 실행 (AI 생성)
+③ 검증  → 스크립트 호출 통과 ✅
+✅ 성공 — 1스텝 만에 적용 + 런타임 동작 검증 통과
+```
+
+- "배포 성공 ≠ 동작 정상"은 **구현 도중 실제로 겪었다**: `module.exports.params` 선언을 빠뜨린
+  첫 스크립트가 **배포는 성공했지만** 호출하니 `params` 가 비어 와 `invalid streak` 를 반환했다.
+  배포 로그만 봤다면 성공으로 넘어갔을 결함이다. → 생성 지침에 선언 필수를 못 박았고,
+  이후 AI 가 생성한 스크립트는 `module.exports.params` 를 정확히 포함했다.
+
+## 8. 구현 결과
+
+| 파일 | 역할 |
+|---|---|
+| `Orchestrator/Targets/UgsInvoker.cs` | 토큰 교환(50분 캐시) · 스크립트 호출 · `JsonSubset` 부분일치 비교 |
+| `Orchestrator/Targets/UgsTarget.cs` | `Supports(RuntimeAssert)` = 자격 증명 있을 때 true, 환경 이름→ID 해석 |
+| `Orchestrator/Util/DotEnv.cs` | `.env` → 프로세스 환경(자식 `ugs` 프로세스가 상속) |
+
+`VerifyKind.PlayModeAssert` → **`RuntimeAssert`** 로 개명하고, `IExecTarget.VerifyLabel` 은
+**`LabelFor(kind)`** 로 통합했다(같은 검증 종류라도 손마다 이름이 다르다:
+Unity "컴파일"/"플레이모드 assert", UGS "배포"/"스크립트 호출").
+**`AgentLoop` 는 고치지 않았다** — `Supports(kind)` 게이팅 덕분에 UGS 가 true 를 내는 순간 같은 흐름이 그대로 돌았다.

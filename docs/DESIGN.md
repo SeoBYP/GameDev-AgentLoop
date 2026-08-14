@@ -97,7 +97,7 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 | **1** ✅ | 로컬 순수 루프 골격 (`ApiBackend` + `UnityEditorTarget`) | 자가수리로 컴파일 통과하는 루프 — **달성**(§6.5) |
 | **2** ✅ | CLI 백엔드(ClaudeCode/Codex) + 플레이모드 검증 | agent-agnostic 실증 + **런타임 동작 검증** — 달성(§6.5) |
 | **3** ✅ | 도메인 Skills(최적화·아키텍처·함정) | 산출 코드 "품질" 대조 데모 — 달성(§6.7) |
-| **4** 🚧 | `UgsTarget`(Cloud Code 배포·검증) | 구현·검증 완료, **실배포는 사용자 인증 대기**(§6.8) |
+| **4** ✅ | `UgsTarget`(Cloud Code 배포·호출 검증) | 실제 UGS 프로젝트로 **배포 + 호출 검증 관통**(§6.8) |
 
 ---
 
@@ -193,8 +193,9 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 | | `UnityEditorTarget` | `UgsTarget` |
 |---|---|---|
 | 산출물 | C# 컴포넌트 (`Assets/Scripts/`) | Cloud Code JS (`CloudCode/`) |
-| 1차 검증 | 컴파일 (`recompile_status`) | **배포** (`ugs deploy`) — 서버가 스크립트를 검증 |
-| 런타임 검증 | 플레이모드 assert (`eval`) | 미지원 |
+| 1차 검증 | 컴파일 (`recompile_status`) | **배포** (`ugs deploy`, publish 포함) |
+| 런타임 검증 | 플레이모드 assert (`eval`) | **스크립트 호출** (Cloud Code REST) |
+| assert 형식 | C# 스니펫 (`"OK"` 반환) | JSON 호출 명세 (응답 부분일치) |
 
 **그래서 `IExecTarget` 이 자기를 설명하게 했다.** 초안(§4)의 인터페이스는 `Apply`/`Verify` 뿐이었지만,
 타깃마다 *만들 언어*와 *가능한 검증*이 달라 루프가 그걸 알아야 했다:
@@ -202,12 +203,25 @@ record VerifyResult(bool Ok, string Log, IReadOnlyList<string> Errors);
 → 시스템 프롬프트 = **[루프의 형식 계약] + [손의 생성 규격] + [스킬의 품질 지침]** 으로 조립된다
 (`--print-prompt` 로 확인). 루프는 형식만 소유한다.
 
-**정직한 한계 — 호출 검증은 (아직) 없다.**
+**호출 검증 — CLI 에 없어서 REST 로 직접 붙였다.**
 `ugs cloud-code scripts` 에는 create/publish/get/list/update/delete 만 있고 **invoke/run 이 없다.**
-그래서 이 타깃은 `Supports(PlayModeAssert) == false` 를 반환하고, 루프는 런타임 단계를 건너뛴다.
-없는 기능을 있는 척하지 않는다.
-→ 호출까지 검증하는 경로는 **[docs/UGS-INVOKE-DESIGN.md](UGS-INVOKE-DESIGN.md)** 에 설계해 두었다
-(서비스 계정 → 토큰 교환 → Cloud Code Client API 호출 → 응답 부분일치 검증).
+그래서 `UgsInvoker` 가 서비스 계정 → 토큰 교환 → Cloud Code Client API 호출을 직접 수행한다
+(설계·엔드포인트: **[docs/UGS-INVOKE-DESIGN.md](UGS-INVOKE-DESIGN.md)**). 의존성 0 원칙에 따라 `HttpClient` 직통.
+assert 는 JS 스니펫이 아니라 **선언적 JSON 호출 명세**이고, 응답은 **부분 일치**로 비교한다
+(부가 필드로 검증이 깨지지 않게).
+
+**실측(실제 UGS 프로젝트)**: `--target ugs --claude` 로 레벨업 보상 스크립트를 생성 →
+배포 → 호출 검증까지 **1스텝 통과**. 배포된 스크립트를 REST 로 독립 재확인했다
+(`level=60 → coins 3000`, `level=100 → 3000 클램프`, `level=0 → 거부`).
+
+**실측으로 얻은 함정 4가지 (코드·지침에 반영)**
+1. `--services` 값은 `cloud-code` 가 아니라 **`cloud-code-scripts`**. 틀리면 조용히 "No content deployed".
+2. **게시 권한은 별도** — `Cloud Code Editor` 로는 부족하고 `Cloud Code Publisher` 가 필요하다.
+3. 권한 실패(403)로 중단되면 **반쯤 생성된 스크립트 레코드**가 남아 이후 배포가 500 을 낸다. 삭제 후 재배포.
+4. **`module.exports.params` 를 선언하지 않으면 파라미터가 걸러진다** — 배포는 성공하는데 호출하면
+   `params` 가 비어 와 로직이 틀린다. *"배포 성공 ≠ 동작 정상"* 의 실사례이고,
+   호출 검증이 없으면 절대 못 잡는다. → `GenerationBrief` 에 선언 필수로 명시.
+5. `ugs env list` 는 `--environment-name` 을 받지 않는다(주면 도움말만 출력) — 명령별로 플래그를 가려서 붙인다.
 
 **검증 범위(현재)**: 파일 적용 · `ugs deploy` 호출/결과 파싱 · 타깃별 프롬프트 조립 · 타깃별 스킬 필터 ·
 미인증 시 사전 차단까지 실측 확인. **실제 배포 성공 경로**는 서비스 계정 키가 필요해 사용자 설정 후 확인한다
