@@ -3,6 +3,7 @@ using Orchestrator.Contracts;
 using Orchestrator.Loop;
 using Orchestrator.Skills;
 using Orchestrator.Targets;
+using Orchestrator.Util;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 오케스트레이터 진입점 — 루프 5단계를 조립·실행한다.
@@ -25,6 +26,13 @@ if (projectPath is null || !Directory.Exists(Path.Combine(projectPath, "Assets")
     Console.Error.WriteLine("Unity 프로젝트 루트를 찾지 못했습니다(Assets/ 없음). --project <경로> 로 지정하세요.");
     return 2;
 }
+
+// 1-a) .env 로드 — 자격 증명을 OS 전역이 아닌 레포 루트 파일로 관리한다(.gitignore 로 보호됨).
+//      여기서 올린 값은 자식 프로세스(`ugs`/`claude`/`codex`)에도 그대로 상속된다.
+var envFile = opts.EnvFile ?? Path.Combine(projectPath, ".env");
+var loadedKeys = DotEnv.Load(envFile);
+if (loadedKeys.Count > 0)
+    Console.WriteLine($".env 적용: {string.Join(", ", loadedKeys)}");   // 키 이름만 — 값은 절대 출력하지 않는다
 
 // 1-b) 도메인 스킬 로드 (Phase 3) — 포터블 마크다운이라 모든 백엔드에 동일하게 적용된다.
 var skillsDir = opts.SkillsDir ?? Path.Combine(projectPath, "Skills");
@@ -53,7 +61,10 @@ IExecTarget target;
 if (opts.Target.Equals("ugs", StringComparison.OrdinalIgnoreCase))
 {
     var deployDir = opts.CloudCodeDir ?? Path.Combine(projectPath, "CloudCode");
-    target = new UgsTarget(projectPath, deployDir, opts.UgsProjectId, opts.UgsEnvironment);
+    // 프로젝트/환경은 인자 → 환경변수(.env 포함) 순으로 해석한다.
+    var ugsProjectId = opts.UgsProjectId ?? Environment.GetEnvironmentVariable("UGS_CLI_PROJECT_ID");
+    var ugsEnv = opts.UgsEnvironment ?? Environment.GetEnvironmentVariable("UGS_CLI_ENVIRONMENT_NAME");
+    target = new UgsTarget(projectPath, deployDir, ugsProjectId, ugsEnv);
 }
 else
 {
@@ -179,6 +190,7 @@ static Options ParseArgs(string[] args)
             case "--skills-dir" when i + 1 < args.Length: o.SkillsDir = args[++i]; break;
             case "--list-skills": o.ListSkills = true; break;
             case "--print-prompt": o.PrintPrompt = true; break;
+            case "--env-file" when i + 1 < args.Length: o.EnvFile = args[++i]; break;
             case "--target" when i + 1 < args.Length: o.Target = args[++i]; break;
             case "--ugs-project-id" when i + 1 < args.Length: o.UgsProjectId = args[++i]; break;
             case "--ugs-env" when i + 1 < args.Length: o.UgsEnvironment = args[++i]; break;
@@ -255,6 +267,7 @@ sealed class Options
     public bool SkillsOff { get; set; }
     public bool ListSkills { get; set; }
     public bool PrintPrompt { get; set; }
+    public string? EnvFile { get; set; }
     public string? SkillsDir { get; set; }
     public string Target { get; set; } = "unity";   // unity | ugs
     public string? UgsProjectId { get; set; }

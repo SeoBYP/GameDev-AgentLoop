@@ -114,11 +114,21 @@ dotnet run --project Orchestrator -- --claude "스태미나 컴포넌트" \
 같은 루프로 **백엔드(UGS Cloud Code)** 를 만들고 배포까지 검증한다.
 
 ```bash
-# 전제: ugs CLI 설치(npm i -g ugs) + 서비스 계정 인증 + 프로젝트 지정
-ugs login                                    # 또는 UGS_CLI_SERVICE_KEY_ID / UGS_CLI_SERVICE_SECRET_KEY
-dotnet run --project Orchestrator -- --target ugs --claude "일일 보상 지급 스크립트" \
-  --ugs-project-id <project-id> --ugs-env production
+# 전제: ugs CLI 설치(npm i -g ugs) + 서비스 계정 자격 + 프로젝트 지정
+cp .env.example .env      # 값 채우기 (.gitignore 로 보호됨)
+dotnet run --project Orchestrator -- --target ugs --claude "일일 보상 지급 스크립트"
 ```
+
+자격 증명은 **`.env`** 로 관리한다. 오케스트레이터가 시작할 때 읽어 프로세스 환경변수로 올리고,
+자식 프로세스(`ugs` CLI)가 그대로 상속하므로 **CLI 배포와 REST 호출이 같은 자격**을 쓴다.
+값은 절대 로그에 남기지 않는다(적용된 **키 이름만** 출력). 이미 설정된 OS 환경변수가 있으면 그쪽이 우선.
+
+| 변수 | 용도 |
+|---|---|
+| `UGS_CLI_SERVICE_KEY_ID` / `UGS_CLI_SERVICE_SECRET_KEY` | 서비스 계정 자격 (대시보드 → Administration → Service Accounts) |
+| `UGS_CLI_PROJECT_ID` / `UGS_CLI_ENVIRONMENT_NAME` | 배포 대상 (인자 `--ugs-project-id`/`--ugs-env` 가 우선) |
+
+필요한 역할: **Cloud Code Editor** + **Unity Environments Viewer** (대상 프로젝트에 부여).
 
 인증·프로젝트가 준비되지 않았으면 **AI 를 부르기 전에** 안내와 함께 종료한다(`ConnectionHint`).
 옵션: `--ugs-project-id` · `--ugs-env` · `--cloud-code-dir <경로>`(기본 `CloudCode/`).
