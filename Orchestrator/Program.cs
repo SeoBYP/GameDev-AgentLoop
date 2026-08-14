@@ -150,6 +150,7 @@ var loop = new AgentLoop(
         MaxSteps = opts.MaxSteps,
         Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
         NoPerf = opts.NoPerf,
+        CaptureDir = opts.Capture ? (opts.CaptureDir ?? Path.Combine(projectPath, "docs", "artifacts")) : null,
     },
     selectedSkills);
 
@@ -191,6 +192,8 @@ static Options ParseArgs(string[] args)
             case "--demo-skills": o.DemoSkills = true; break;
             case "--demo-perf": o.DemoPerf = true; break;
             case "--no-perf": o.NoPerf = true; break;
+            case "--capture": o.Capture = true; break;
+            case "--capture-dir" when i + 1 < args.Length: o.CaptureDir = args[++i]; o.Capture = true; break;
             case "--claude": o.Claude = true; break;
             case "--codex": o.Codex = true; break;
             case "--assert" when i + 1 < args.Length: o.Assert = args[++i]; break;
@@ -274,6 +277,8 @@ sealed class Options
     public bool DemoSkills { get; set; }
     public bool DemoPerf { get; set; }
     public bool NoPerf { get; set; }
+    public bool Capture { get; set; }
+    public string? CaptureDir { get; set; }
     public bool Claude { get; set; }
     public bool Codex { get; set; }
     public string? Assert { get; set; }

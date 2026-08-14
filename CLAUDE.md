@@ -76,5 +76,11 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
   Unity Mono 는 Boehm GC 라 `GC.*` 할당 측정 API 가 무용 → **시간으로 측정**(무할당 4.8ms vs 할당 30.2ms/5만회).
   `--demo-perf`: 동작은 맞지만 핫패스 할당 → 41ms 초과 → 수리 → 11.8ms 통과.
   절대 ms 예산은 기기 의존적 → 마진 넓게(12ms 로 잡았다 플래키해서 25ms 로 조정).
-- 다음: 시나리오 재생(다중 프레임), `run_tests` 연동, 드로우콜·메모리 예산 승격.
+- **Phase 6 완료** — 테스트 러너·시나리오·시각 증거(레퍼런스 unity-cli-loop 에서 검증 수단만 흡수).
+  - `VerifyKind.Tests`: 테스트 파일(`/Tests/` 경로)이 오면 ASSERT 대신 **테스트 러너**로 검증(레포에 남는 자산).
+  - **PlayMode 테스트는 동기 실행 불가** → `run_tests --async_tests` + `test_status` 폴링(data.result 는 JSON 문자열).
+  - asmdef 필수: 테스트 asmdef 는 `Assembly-CSharp` 참조 불가 → `Assets/Scripts/AgentLoop.Runtime.asmdef` + `Assets/Tests/PlayMode/AgentLoop.Tests.asmdef`.
+  - 부작용: 도메인 리로드 직후 `eval` 이 새 어셈블리를 몰라 실패하는 창 → `EvalWithRetryAsync` 로 1회 재시도.
+  - 시나리오 재생 = `[UnityTest]` 코루틴(별도 기능 없음). 시각 증거 = `--capture`(판정 아님, `Assets/` 아래로 갇히므로 옮겨서 저장).
+- 다음: 입력 시뮬레이션, 큰 로그 파일로 빼기(컨텍스트 절약), eval 보안 등급, 드로우콜·메모리 예산 승격.
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

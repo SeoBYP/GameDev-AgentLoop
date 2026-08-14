@@ -35,6 +35,13 @@ public interface IExecTarget
     /// <summary>사전 점검 실패 시 사용자에게 보여줄 해결 안내.</summary>
     string ConnectionHint { get; }
 
+    /// <summary>
+    /// 결과 화면을 캡처해 증거로 남긴다(지원하는 손만). 저장한 경로를 반환하고, 못 하면 null.
+    /// **합격 판정이 아니라 증거 수집**이다 — 기준 이미지 없이 시각 회귀를 판정하지는 않는다.
+    /// </summary>
+    Task<string?> CaptureEvidenceAsync(string destinationPath, CancellationToken ct) =>
+        Task.FromResult<string?>(null);
+
     /// <summary>생성된 파일 편집을 프로젝트에 적용한다(파일 쓰기 + 리컴파일 트리거).</summary>
     Task<ApplyResult> ApplyAsync(IReadOnlyList<FileEdit> edits, CancellationToken ct);
 

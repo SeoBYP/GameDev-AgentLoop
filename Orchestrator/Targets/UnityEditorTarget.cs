@@ -31,13 +31,14 @@ public sealed class UnityEditorTarget : IExecTarget
     public string Name => _label;
 
     public bool Supports(VerifyKind kind) =>
-        kind is VerifyKind.Compile or VerifyKind.RuntimeAssert or VerifyKind.Performance;
+        kind is VerifyKind.Compile or VerifyKind.RuntimeAssert or VerifyKind.Performance or VerifyKind.Tests;
 
     public string LabelFor(VerifyKind kind) => kind switch
     {
         VerifyKind.Compile => "컴파일",
         VerifyKind.RuntimeAssert => "플레이모드 assert",
         VerifyKind.Performance => "성능 예산",
+        VerifyKind.Tests => "테스트 러너",
         _ => kind.ToString(),
     };
 
@@ -48,9 +49,41 @@ public sealed class UnityEditorTarget : IExecTarget
     /// <summary>Unity 에디터 타깃의 생성 규격 — C# 스크립트 + 플레이모드 assert 스니펫.</summary>
     public string GenerationBrief => """
         TARGET: Unity 6 (6000.x) Editor, C#. Assume UnityEngine is available.
-        - Put runtime scripts under Assets/Scripts/.
+        - Put runtime scripts under Assets/Scripts/ (assembly `AgentLoop.Runtime`).
 
-        - After the FILE blocks, emit EXACTLY ONE runtime check as:
+        - PREFER writing a PlayMode test over the ASSERT block below. Tests persist in the repo
+          and guard against regressions, and they can span multiple frames. Emit it as a FILE:
+        FILE: Assets/Tests/PlayMode/<TypeName>Tests.cs
+        ```csharp
+        using System.Collections;
+        using NUnit.Framework;
+        using UnityEngine;
+        using UnityEngine.TestTools;
+
+        public class <TypeName>Tests
+        {
+            [Test]
+            public void Clamps_At_Zero() { /* build the component, act, Assert.AreEqual(...) */ }
+
+            [UnityTest]
+            public IEnumerator Reaches_Target_Over_Frames()
+            {
+                // yield return null; advances one frame — use this for multi-frame scenarios
+                yield return null;
+            }
+        }
+        ```
+          Rules for tests:
+            * The test assembly `AgentLoop.Tests` already exists and references `AgentLoop.Runtime`.
+              Just add the .cs file under Assets/Tests/PlayMode/ — do NOT create an .asmdef.
+            * Create objects with `new GameObject()` + `AddComponent<T>()`; clean up with
+              `Object.DestroyImmediate(go)` (or `Object.Destroy` inside `[UnityTest]`).
+            * Cover the edge cases the goal implies (clamping, bounds, invalid input).
+            * Use `[UnityTest]` + `yield return null` when behavior unfolds over frames
+              (movement, cooldowns, timers) — that is the only way to verify it honestly.
+            * Do NOT emit an ASSERT block when you write tests.
+
+        - If (and only if) you do NOT write tests, emit EXACTLY ONE runtime check as:
         ASSERT:
         ```csharp
         <C# statements ending in a return>
@@ -127,6 +160,7 @@ public sealed class UnityEditorTarget : IExecTarget
             spec.AssertCode ?? throw new ArgumentException("RuntimeAssert 는 AssertCode 가 필요합니다.", nameof(spec)), ct),
         VerifyKind.Performance => VerifyPerformanceAsync(
             spec.AssertCode ?? throw new ArgumentException("Performance 는 PERF 명세가 필요합니다.", nameof(spec)), ct),
+        VerifyKind.Tests => VerifyTestsAsync(spec.AssertCode, ct),
         _ => throw new NotSupportedException($"지원하지 않는 검증: {spec.Kind}"),
     };
 
@@ -175,8 +209,9 @@ public sealed class UnityEditorTarget : IExecTarget
 
         try
         {
-            var res = await RunCommandAsync("eval", ct, assertCode);
-            var (ok, message) = ParseEvalOutcome(res.StdOut);
+            var (res, message) = await EvalWithRetryAsync(assertCode, ct);
+            var ok = message.Trim().Equals("OK", StringComparison.OrdinalIgnoreCase) ||
+                     message.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
 
             return ok
                 ? new VerifyResult(true, res.StdOut, Array.Empty<string>())
@@ -186,6 +221,106 @@ public sealed class UnityEditorTarget : IExecTarget
         {
             // 검증이 실패하든 취소되든 에디터를 반드시 플레이모드에서 빼낸다(부작용 방지).
             await RunCommandAsync("editor_stop", CancellationToken.None);
+        }
+    }
+
+    // ── ③-d 테스트 러너 검증 ────────────────────────────────────────────────────
+    // RuntimeAssert 가 "한 번 쓰고 버리는 스니펫"이라면, 이건 **레포에 남는 테스트**다.
+    // `[UnityTest]` 코루틴이면 여러 프레임에 걸친 시나리오까지 검증된다.
+    //
+    // 계약(실측): PlayMode 테스트는 플레이모드 진입 시 도메인 리로드가 HTTP 요청을 끊어서
+    //   **동기 실행이 불가능**하다. CLI 도 그렇게 안내한다 →
+    //   `run_tests --async_tests` 로 시작하고 `test_status` 를 폴링해야 한다.
+    //   test_status 의 data.result 는 JSON **문자열**이라 한 번 더 파싱한다.
+    private async Task<VerifyResult> VerifyTestsAsync(string? filter, CancellationToken ct)
+    {
+        await WaitUntilReadyAsync(ct);
+
+        var args = new List<string> { "run_tests", "--mode", "PlayMode", "--async_tests" };
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            args.Add("--filter");
+            args.Add(filter!);
+        }
+        await RunCommandAsync(args[0], ct, args.Skip(1).ToArray());
+
+        var deadline = DateTime.UtcNow.AddSeconds(_timeoutSec);
+        await Task.Delay(1500, ct);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var res = await RunCommandAsync("test_status", ct);
+            var report = ParseTestStatus(res.StdOut);
+
+            if (report is { Completed: true })
+            {
+                if (report.Total == 0)
+                    return new VerifyResult(false, res.StdOut,
+                        new[] { "실행된 테스트가 없습니다. 테스트 파일이 Assets/Tests/PlayMode/ 에 있는지 확인하세요." });
+
+                var log = $"테스트 {report.Passed}/{report.Total} 통과";
+                return report.Failed == 0
+                    ? new VerifyResult(true, log, Array.Empty<string>())
+                    : new VerifyResult(false, log, report.Failures);
+            }
+            await Task.Delay(1500, ct);
+        }
+
+        return new VerifyResult(false, "test_status 폴링 타임아웃", new[] { "<test timeout>" });
+    }
+
+    private sealed record TestReport(bool Completed, int Total, int Passed, int Failed, IReadOnlyList<string> Failures);
+
+    private static TestReport? ParseTestStatus(string stdout)
+    {
+        try
+        {
+            using var outer = JsonDocument.Parse(stdout.Trim());
+            if (!outer.RootElement.TryGetProperty("data", out var data) ||
+                !data.TryGetProperty("result", out var result))
+                return null;
+
+            // data.result 는 JSON 문자열로 온다.
+            using var inner = result.ValueKind == JsonValueKind.String
+                ? JsonDocument.Parse(result.GetString() ?? "{}")
+                : null;
+            var obj = inner?.RootElement ?? result;
+
+            var status = obj.TryGetProperty("status", out var st) ? st.GetString() : null;
+            if (status != "completed")
+                return new TestReport(false, 0, 0, 0, Array.Empty<string>());
+
+            int total = 0, passed = 0, failed = 0;
+            if (obj.TryGetProperty("summary", out var sum))
+            {
+                total = sum.TryGetProperty("total", out var t) ? t.GetInt32() : 0;
+                passed = sum.TryGetProperty("passed", out var p) ? p.GetInt32() : 0;
+                failed = sum.TryGetProperty("failed", out var f) ? f.GetInt32() : 0;
+            }
+
+            // 실패한 테스트만 뽑아 모델이 고칠 수 있게 이름 + 메시지로 만든다.
+            var failures = new List<string>();
+            if (obj.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var r in results.EnumerateArray())
+                {
+                    var s = r.TryGetProperty("Status", out var rs) ? rs.GetString() : null;
+                    if (s is null || s.Equals("Passed", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var name = r.TryGetProperty("FullName", out var fn) ? fn.GetString() : "(이름 없음)";
+                    var msg = r.TryGetProperty("Message", out var m) && m.ValueKind == JsonValueKind.String
+                        ? Flatten(m.GetString() ?? "")
+                        : "";
+                    failures.Add(msg.Length > 0 ? $"{name}: {msg}" : $"{name}: {s}");
+                }
+            }
+
+            return new TestReport(true, total, passed, failed, failures);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -210,8 +345,7 @@ public sealed class UnityEditorTarget : IExecTarget
 
         try
         {
-            var res = await RunCommandAsync("eval", ct, PerfHarness.BuildSnippet(spec));
-            var (ok, raw) = ParseEvalOutcome(res.StdOut);
+            var (res, raw) = await EvalWithRetryAsync(PerfHarness.BuildSnippet(spec), ct);
 
             if (!double.TryParse(raw, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out var elapsedMs))
@@ -237,6 +371,87 @@ public sealed class UnityEditorTarget : IExecTarget
         {
             await RunCommandAsync("editor_stop", CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// eval 실행 + 1회 재시도. 반환은 (원본 응답, 해석된 값/메시지).
+    ///
+    /// 왜 재시도가 필요한가(실측): 테스트 러너처럼 플레이모드 진입·이탈로 **도메인 리로드**를 유발한 직후엔
+    /// eval 의 컴파일 컨텍스트가 새 어셈블리(`AgentLoop.Runtime`)를 아직 모를 수 있다.
+    /// 그때 "The type or namespace name 'X' could not be found" 로 실패하는데, 잠시 뒤엔 정상 해석된다.
+    /// 모델의 코드 잘못이 아닌 인프라 타이밍이므로 조용히 한 번 더 시도한다.
+    /// </summary>
+    private async Task<(ProcessResult Res, string Value)> EvalWithRetryAsync(string code, CancellationToken ct)
+    {
+        var res = await RunCommandAsync("eval", ct, code);
+        var (_, value) = ParseEvalOutcome(res.StdOut);
+
+        if (LooksLikeStaleAssembly(value))
+        {
+            await Task.Delay(2500, ct);
+            await WaitUntilReadyAsync(ct);
+            res = await RunCommandAsync("eval", ct, code);
+            (_, value) = ParseEvalOutcome(res.StdOut);
+        }
+        return (res, value);
+    }
+
+    private static bool LooksLikeStaleAssembly(string message) =>
+        message.Contains("could not be found", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("are you missing", StringComparison.OrdinalIgnoreCase);
+
+    // ── 시각 증거 캡처 ──────────────────────────────────────────────────────────
+    /// <summary>
+    /// 게임 뷰를 PNG 로 캡처해 <paramref name="destinationPath"/> 에 남긴다.
+    ///
+    /// 주의(실측): `capture_game_view --save_path` 는 절대경로를 주더라도 **Assets/ 아래로 가둔다**
+    /// (pipeline 의 authoring root 제약). 그래서 Assets/ 밑 임시 폴더로 찍은 뒤 밖으로 옮기고,
+    /// Unity 가 만든 .meta 까지 정리한다.
+    ///
+    /// 이건 **합격 판정이 아니라 증거 수집**이다. 기준 이미지 없이 "화면이 맞다"를 판정할 수는 없고,
+    /// 다만 렌더 결과가 사실상 비어 있으면(PNG 가 극단적으로 작으면) 경고를 남긴다.
+    /// </summary>
+    public async Task<string?> CaptureEvidenceAsync(string destinationPath, CancellationToken ct)
+    {
+        const string tempDir = "__agentloop_capture";
+        var relative = $"{tempDir}/shot.png";
+        var stagedFull = Path.Combine(_projectPath, "Assets", tempDir, "shot.png");
+
+        try
+        {
+            var res = await RunCommandAsync("capture_game_view", ct,
+                "--width", "960", "--height", "540", "--save_path", relative);
+
+            if (!File.Exists(stagedFull))
+                return null;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(stagedFull, destinationPath, overwrite: true);
+
+            var bytes = new FileInfo(destinationPath).Length;
+            CleanupStaging(Path.Combine(_projectPath, "Assets", tempDir));
+
+            // 균일한 화면(아무것도 안 그려짐)은 PNG 가 극단적으로 작게 압축된다 — 경고용 휴리스틱.
+            return bytes < 2048 ? $"{destinationPath} (⚠ {bytes}B — 화면이 비어 있을 수 있음)" : destinationPath;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void CleanupStaging(string dir)
+    {
+        try
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+            var meta = dir + ".meta";
+            if (File.Exists(meta))
+                File.Delete(meta);
+        }
+        catch { /* 정리 실패는 무시 */ }
     }
 
     /// <summary>프로파일링 통계(드로우콜·메모리·프레임타임)를 한 줄로 요약한다.</summary>

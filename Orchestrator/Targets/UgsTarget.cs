@@ -63,7 +63,7 @@ public sealed class UgsTarget : IExecTarget
     {
         VerifyKind.Compile => "배포",
         VerifyKind.RuntimeAssert => "스크립트 호출",
-        _ => kind.ToString(),
+        _ => kind.ToString(),   // Performance/Tests 는 이 손에서 지원하지 않는다
     };
 
     public UgsTarget(

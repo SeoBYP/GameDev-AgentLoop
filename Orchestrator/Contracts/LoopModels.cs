@@ -52,6 +52,13 @@ public enum VerifyKind
     /// Phase 3 스킬이 "Update 에서 할당하지 마라"를 **정적으로 추측**한다면, 이건 **실측**한다.
     /// </summary>
     Performance,
+
+    /// <summary>
+    /// Unity Test Runner 로 테스트를 실행한다(Phase 6).
+    /// RuntimeAssert(일회용 eval 스니펫)와 달리 **테스트 파일이 레포에 남는다** — 검증이 자산이 된다.
+    /// `[UnityTest]` 코루틴을 쓰면 여러 프레임에 걸친 시나리오까지 검증할 수 있다.
+    /// </summary>
+    Tests,
 }
 
 /// <summary>

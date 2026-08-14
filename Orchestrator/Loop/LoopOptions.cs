@@ -14,6 +14,9 @@ public sealed record LoopOptions
 
     /// <summary>성능 검증(③-c)을 끄고 동작 검증까지만 본다(대조·디버깅용).</summary>
     public bool NoPerf { get; init; }
+
+    /// <summary>성공 시 결과 화면을 캡처해 남길 디렉터리(지정 시에만 캡처).</summary>
+    public string? CaptureDir { get; init; }
 }
 
 /// <summary>루프 종료 판정 결과.</summary>

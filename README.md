@@ -18,9 +18,13 @@
 | 검증 층 | 통과해도 놓치는 것 | 어떻게 잡나 |
 |---|---|---|
 | ③-a **컴파일** | *"그럴듯한데 안 도는 코드"* | `unity command recompile_status` 로 실제 컴파일 에러 수집 |
-| ③-b **런타임 동작** | *"컴파일은 되는데 로직이 틀린 코드"* | **플레이모드 진입** 후 `eval` 로 assert 실행 |
+| ③-b **런타임 동작** | *"컴파일은 되는데 로직이 틀린 코드"* | **Unity Test Runner** 로 실행(없으면 플레이모드 `eval` assert) |
+| ③-b′ **시나리오** | *"한 프레임만 보면 맞아 보이는 코드"* | **`[UnityTest]` 코루틴**으로 여러 프레임에 걸쳐 검증 |
 | ③-c **성능 예산** | *"동작은 맞는데 매 프레임 할당하는 코드"* | 핫패스를 5만 회 돌려 **경과 시간 실측** + 프로파일 통계 |
 | ①-b **도메인 품질** | *"돌지만 잘못 만든 코드"* | 스킬 정적 검사로 **적용 전 반려** |
+
+검증은 **자산으로 남는다** — AI가 구현과 함께 PlayMode 테스트를 작성하고,
+그 테스트는 레포에 남아 이후 실행마다 회귀를 잡는다. 결과 화면도 `--capture` 로 증거로 남길 수 있다.
 
 ### 실측 로그 — "동작 정상 ≠ 충분히 빠름"
 
@@ -84,6 +88,10 @@ dotnet run --project Orchestrator -- --demo-perf    # 동작은 맞으나 성능
 
 # 실제 AI 로 (API 키 불필요 — CLI 로그인만)
 dotnet run --project Orchestrator -- --claude "간단한 HP 컴포넌트를 만들어줘"
+
+# 테스트까지 생성시키고(레포에 남음) 결과 화면도 캡처
+dotnet run --project Orchestrator -- --claude --capture \
+  "목표 지점으로 이동하는 컴포넌트. 여러 프레임에 걸쳐 도착하는지 [UnityTest] 로 검증해줘"
 dotnet run --project Orchestrator -- --codex --model gpt-5.5 "오브젝트 풀을 만들어줘"
 
 # 백엔드(UGS Cloud Code)를 타깃으로

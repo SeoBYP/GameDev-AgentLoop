@@ -107,37 +107,47 @@ public sealed class AgentLoop
             }
             _log($"③ 검증  → {_target.LabelFor(VerifyKind.Compile)} 통과 ✅");
 
-            // ③-b 검증: 플레이모드 런타임 assert (있을 때만)
-            // 사람이 준 assert(_options.Assert)가 백엔드가 낸 ASSERT 블록보다 우선한다.
+            // ③-b 검증: 런타임 동작
+            // 테스트 파일이 왔으면 **테스트 러너**로 검증한다(레포에 남는 자산 + 다중 프레임 가능).
+            // 없으면 일회용 ASSERT 스니펫으로 대체한다. 사람이 준 assert 는 언제나 우선.
+            var hasTests = reply.Edits.Any(e => IsTestFile(e.RelativePath));
+            var useTests = hasTests && _options.Assert is null && _target.Supports(VerifyKind.Tests);
             var assertCode = _options.Assert ?? EditParser.ParseAssert(reply.Text);
-            if (assertCode is null || !_target.Supports(VerifyKind.RuntimeAssert))
+
+            if (!useTests && (assertCode is null || !_target.Supports(VerifyKind.RuntimeAssert)))
             {
                 // ⑤ 판정 — 런타임 기준이 없거나 타깃이 런타임 검증을 지원하지 않으면 여기까지가 성공 기준.
-                var why = assertCode is null ? "런타임 assert 없음" : "타깃이 런타임 검증 미지원";
+                var why = assertCode is null ? "런타임 검증 기준 없음" : "타깃이 런타임 검증 미지원";
                 return new LoopResult(true, step, $"{step}스텝 만에 적용·검증 통과 ({why})");
             }
 
-            var runtimeLabel = _target.LabelFor(VerifyKind.RuntimeAssert);
-            _log($"③ 검증  → {runtimeLabel} 실행 ({(_options.Assert is not null ? "사람 지정" : "AI 생성")})");
-            var play = await _target.VerifyAsync(new VerifySpec(VerifyKind.RuntimeAssert, assertCode), ct);
+            var runtimeKind = useTests ? VerifyKind.Tests : VerifyKind.RuntimeAssert;
+            var runtimeLabel = _target.LabelFor(runtimeKind);
+            var source = useTests ? "테스트 파일" : (_options.Assert is not null ? "사람 지정" : "AI 생성");
+            _log($"③ 검증  → {runtimeLabel} 실행 ({source})");
+
+            var play = await _target.VerifyAsync(
+                new VerifySpec(runtimeKind, useTests ? null : assertCode), ct);
 
             if (!play.Ok)
             {
-                _log($"③ 검증  → {runtimeLabel} 실패 ❌");
+                _log($"③ 검증  → {runtimeLabel} 실패 ❌  {play.Log}");
                 foreach (var e in play.Errors.Take(3))
                     _log($"      · {e}");
 
                 // ④ 피드백 → 다음 스텝 ①로
-                history.Add(new Turn(Role.User, BuildAssertFeedback(play.Errors)));
+                history.Add(new Turn(Role.User,
+                    useTests ? BuildTestFeedback(play.Errors) : BuildAssertFeedback(play.Errors)));
                 continue;
             }
-            _log($"③ 검증  → {runtimeLabel} 통과 ✅");
+            _log($"③ 검증  → {runtimeLabel} 통과 ✅  {play.Log}");
 
             // ③-c 검증: 성능 예산 (프로파일링) — "동작 정상 ≠ 충분히 빠름"
             var perfSpec = _options.NoPerf ? null : EditParser.ParsePerf(reply.Text);
             if (perfSpec is null || !_target.Supports(VerifyKind.Performance))
             {
                 // ⑤ 판정
+                await CaptureEvidenceAsync(goal, ct);
                 return new LoopResult(true, step, $"{step}스텝 만에 적용 + 런타임 동작 검증 통과");
             }
 
@@ -148,6 +158,7 @@ public sealed class AgentLoop
             if (perf.Ok)
             {
                 _log($"③ 검증  → {perfLabel} 통과 ✅  {perf.Log}");
+                await CaptureEvidenceAsync(goal, ct);
                 return new LoopResult(true, step, $"{step}스텝 만에 동작 + 성능까지 검증 통과");
             }
 
@@ -223,6 +234,44 @@ public sealed class AgentLoop
 
             규칙을 지키도록 구현을 고쳐 전체 파일을 다시 출력하세요
             (예: Update 계열에서 쓰던 탐색/캐싱 대상은 Awake 또는 Start 에서 한 번만 확보해 필드에 보관).
+            """;
+    }
+
+    // 성공 시 결과 화면을 남긴다(옵션). 판정에는 영향을 주지 않는 **증거 수집**이다.
+    private async Task CaptureEvidenceAsync(string goal, CancellationToken ct)
+    {
+        if (_options.CaptureDir is null)
+            return;
+
+        var name = new string(goal.Take(40).Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
+        var dest = Path.Combine(_options.CaptureDir, $"{DateTime.Now:yyyyMMdd-HHmmss}-{name}.png");
+
+        try
+        {
+            var saved = await _target.CaptureEvidenceAsync(dest, ct);
+            if (saved is not null)
+                _log($"📸 결과 화면: {saved}");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* 증거 수집 실패가 판정을 뒤집지는 않는다 */ }
+    }
+
+    /// <summary>테스트 파일인가(경로 규약). 테스트가 오면 일회용 assert 대신 테스트 러너로 검증한다.</summary>
+    private static bool IsTestFile(string relativePath) =>
+        relativePath.Replace('\\', '/').Contains("/Tests/", StringComparison.OrdinalIgnoreCase) &&
+        relativePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+
+    // 테스트 실패 피드백. 실패한 테스트 이름·메시지를 그대로 준다.
+    private static string BuildTestFeedback(IReadOnlyList<string> failures)
+    {
+        var list = string.Join("\n", failures.Select(e => "  - " + e));
+        return $"""
+            Unity 테스트 러너에서 **테스트가 실패**했습니다:
+
+            {list}
+
+            구현의 근본 원인을 고쳐 전체 파일을 다시 출력하세요.
+            테스트를 느슨하게 고쳐 통과시키지 마세요 — 검증 기준은 그대로 두고 동작을 고쳐야 합니다.
             """;
     }
 

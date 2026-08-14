@@ -89,8 +89,11 @@ public sealed class SkillLibrary
         foreach (var check in skill.Checks)
         foreach (var edit in edits)
         {
-            // 검사는 런타임 스크립트에만 적용한다(에디터 스크립트는 규칙이 다름).
-            if (edit.RelativePath.Contains("/Editor/", StringComparison.OrdinalIgnoreCase))
+            // 검사는 런타임 스크립트에만 적용한다.
+            // 에디터 스크립트·테스트 코드는 규칙이 다르다(테스트는 public 메서드·임시 할당이 정상).
+            var path = edit.RelativePath.Replace('\\', '/');
+            if (path.Contains("/Editor/", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/Tests/", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             foreach (var message in RunCheck(check, edit.Content))
