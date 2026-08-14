@@ -54,8 +54,11 @@ public sealed class AgentLoop
         {
             _log($"\n──────── step {step}/{_options.MaxSteps} ────────");
 
-            // ① 생성
-            var reply = await _backend.CompleteAsync(new AgentContext(system, history), ct);
+            // ① 생성 — 오래된 시도는 잘라 보낸다(계약이 "매번 전체 파일"이라 최신 것만 있으면 충분).
+            var sent = Trim(history);
+            _log($"  (맥락 {Feedback.ApproxChars(system, sent.Select(t => t.Content)):N0}자 / 턴 {sent.Count}개)");
+
+            var reply = await _backend.CompleteAsync(new AgentContext(system, sent), ct);
             history.Add(new Turn(Role.Assistant, reply.Text));
             _log($"① 생성  → 파일 편집 {reply.Edits.Count}개");
 
@@ -99,7 +102,10 @@ public sealed class AgentLoop
             {
                 _log($"③ 검증  → {_target.LabelFor(VerifyKind.Compile)} 에러 {verify.Errors.Count}건 ❌");
                 foreach (var e in verify.Errors.Take(5))
-                    _log($"      · {e}");
+                    _log($"      · {Feedback.Clip(e, 200)}");
+
+                // 모델에는 상위 N건만 가지만, 사람이 볼 전문은 파일로 남긴다.
+                WriteRunLog(step, "compile", string.Join("\n", verify.Errors) + "\n\n---\n" + verify.Log);
 
                 // ④ 피드백 → 다음 스텝 ①로
                 history.Add(new Turn(Role.User, BuildErrorFeedback(verify.Errors)));
@@ -133,7 +139,9 @@ public sealed class AgentLoop
             {
                 _log($"③ 검증  → {runtimeLabel} 실패 ❌  {play.Log}");
                 foreach (var e in play.Errors.Take(3))
-                    _log($"      · {e}");
+                    _log($"      · {Feedback.Clip(e, 200)}");
+
+                WriteRunLog(step, "runtime", string.Join("\n", play.Errors) + "\n\n---\n" + play.Log);
 
                 // ④ 피드백 → 다음 스텝 ①로
                 history.Add(new Turn(Role.User,
@@ -214,7 +222,7 @@ public sealed class AgentLoop
 
     private static string BuildErrorFeedback(IReadOnlyList<string> errors)
     {
-        var list = string.Join("\n", errors.Select(e => "  - " + e));
+        var list = Feedback.Bullets(errors);
         return $"""
             컴파일에 실패했습니다. 아래 컴파일러 에러를 고쳐서 전체 파일을 다시 출력하세요
             (부분 수정/diff 금지 — 전체 파일 재출력):
@@ -226,7 +234,7 @@ public sealed class AgentLoop
     // 도메인 스킬 위반 피드백. 파일이 프로젝트에 적용되기 전 단계라 "다시 내라"가 명확하다.
     private static string BuildViolationFeedback(IReadOnlyList<SkillViolation> violations)
     {
-        var list = string.Join("\n", violations.Select(v => $"  - {v.FilePath}: {v.Message}"));
+        var list = Feedback.Bullets(violations.Select(v => $"{v.FilePath}: {v.Message}").ToList());
         return $"""
             도메인 규칙(DOMAIN RULES) 위반이 발견되어 적용하지 않았습니다:
 
@@ -235,6 +243,36 @@ public sealed class AgentLoop
             규칙을 지키도록 구현을 고쳐 전체 파일을 다시 출력하세요
             (예: Update 계열에서 쓰던 탐색/캐싱 대상은 Awake 또는 Start 에서 한 번만 확보해 필드에 보관).
             """;
+    }
+
+    /// <summary>
+    /// 히스토리를 최근 N턴으로 자른다(목표 턴은 항상 유지).
+    /// 출력 계약이 "매번 전체 파일"이므로 과거 시도는 최신 응답으로 대체된다 — 버려도 안전하다.
+    /// </summary>
+    private IReadOnlyList<Turn> Trim(List<Turn> history)
+    {
+        var window = _options.HistoryWindow;
+        if (window <= 0 || history.Count <= window + 1)
+            return history;
+
+        var kept = new List<Turn> { history[0] };            // 목표
+        kept.AddRange(history.Skip(history.Count - window));  // 최근 N턴
+        return kept;
+    }
+
+    /// <summary>전체 원문을 파일로 남긴다(모델에는 요약만 간다 — 사람이 볼 몫).</summary>
+    private void WriteRunLog(int step, string title, string body)
+    {
+        if (_options.RunLogDir is null)
+            return;
+
+        try
+        {
+            Directory.CreateDirectory(_options.RunLogDir);
+            var path = Path.Combine(_options.RunLogDir, $"step{step:D2}-{title}.log");
+            File.WriteAllText(path, body);
+        }
+        catch { /* 로그 실패가 루프를 막지는 않는다 */ }
     }
 
     // 성공 시 결과 화면을 남긴다(옵션). 판정에는 영향을 주지 않는 **증거 수집**이다.
@@ -264,7 +302,7 @@ public sealed class AgentLoop
     // 테스트 실패 피드백. 실패한 테스트 이름·메시지를 그대로 준다.
     private static string BuildTestFeedback(IReadOnlyList<string> failures)
     {
-        var list = string.Join("\n", failures.Select(e => "  - " + e));
+        var list = Feedback.Bullets(failures);
         return $"""
             Unity 테스트 러너에서 **테스트가 실패**했습니다:
 
@@ -279,7 +317,7 @@ public sealed class AgentLoop
     // "예산을 늘려라"가 아니라 "구현을 빠르게 고쳐라"를 명시한다.
     private static string BuildPerfFeedback(IReadOnlyList<string> failures)
     {
-        var list = string.Join("\n", failures.Select(e => "  - " + e));
+        var list = Feedback.Bullets(failures);
         return $"""
             동작은 맞지만 **성능 예산을 초과**했습니다(실측):
 
@@ -296,7 +334,7 @@ public sealed class AgentLoop
     // "구현을 고쳐라"를 명시한다 — assert 를 느슨하게 고쳐 통과시키는 쪽으로 새는 걸 막기 위해서.
     private static string BuildAssertFeedback(IReadOnlyList<string> failures)
     {
-        var list = string.Join("\n", failures.Select(e => "  - " + e));
+        var list = Feedback.Bullets(failures);
         return $"""
             컴파일은 통과했지만 **플레이모드 런타임 검증에 실패**했습니다:
 

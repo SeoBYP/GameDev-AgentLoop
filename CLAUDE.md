@@ -82,5 +82,12 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
   - asmdef 필수: 테스트 asmdef 는 `Assembly-CSharp` 참조 불가 → `Assets/Scripts/AgentLoop.Runtime.asmdef` + `Assets/Tests/PlayMode/AgentLoop.Tests.asmdef`.
   - 부작용: 도메인 리로드 직후 `eval` 이 새 어셈블리를 몰라 실패하는 창 → `EvalWithRetryAsync` 로 1회 재시도.
   - 시나리오 재생 = `[UnityTest]` 코루틴(별도 기능 없음). 시각 증거 = `--capture`(판정 아님, `Assets/` 아래로 갇히므로 옮겨서 저장).
-- 다음: 입력 시뮬레이션, 큰 로그 파일로 빼기(컨텍스트 절약), eval 보안 등급, 드로우콜·메모리 예산 승격.
+- **Phase 6 보강 완료** — 컨텍스트 절약 + eval 안전 가드.
+  - 히스토리 윈도우(기본 4턴+목표, `--history-window`) — 계약이 "매번 전체 파일"이라 과거 시도는 버려도 안전.
+    실측: 6스텝에서 11,570자(무제한) → 8,489자(윈도우). 스텝마다 `(맥락 N자/턴 M개)` 로그.
+  - 피드백 상한 8건·400자(`Util/Feedback`), 전체 원문은 `%TEMP%/agentloop-runs/<ts>/` 로.
+    **레퍼런스처럼 "경로만 주기"는 불가** — 우리 백엔드는 도구 없는 텍스트 생성기라 못 읽는다.
+  - `SnippetGuard`: eval 실행 전 위험 API 정적 차단(파일·프로세스·네트워크·레지스트리·에셋삭제·종료).
+    위반은 모델 잘못이라 피드백. `--allow-unsafe-eval` 우회. **샌드박스 아님(리플렉션 우회 가능)**.
+- 다음: 입력 시뮬레이션, 드로우콜·메모리 예산 승격, eval 진짜 격리.
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

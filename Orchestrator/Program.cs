@@ -70,7 +70,10 @@ if (opts.Target.Equals("ugs", StringComparison.OrdinalIgnoreCase))
 else
 {
     var unityExe = UnityEditorTarget.ResolveUnityExe();
-    target = new UnityEditorTarget(unityExe, projectPath, label: $"unity:{ReadEditorVersion(projectPath)}");
+    target = new UnityEditorTarget(
+        unityExe, projectPath,
+        label: $"unity:{ReadEditorVersion(projectPath)}",
+        allowUnsafeEval: opts.AllowUnsafeEval);
 }
 
 // 1-d) 조립된 시스템 프롬프트만 보고 끝내기(디버깅/설명용) — 인증 없이도 타깃별 규격을 확인할 수 있다.
@@ -151,6 +154,8 @@ var loop = new AgentLoop(
         Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
         NoPerf = opts.NoPerf,
         CaptureDir = opts.Capture ? (opts.CaptureDir ?? Path.Combine(projectPath, "docs", "artifacts")) : null,
+        HistoryWindow = opts.HistoryWindow,
+        RunLogDir = Path.Combine(Path.GetTempPath(), "agentloop-runs", DateTime.Now.ToString("yyyyMMdd-HHmmss")),
     },
     selectedSkills);
 
@@ -193,6 +198,8 @@ static Options ParseArgs(string[] args)
             case "--demo-perf": o.DemoPerf = true; break;
             case "--no-perf": o.NoPerf = true; break;
             case "--capture": o.Capture = true; break;
+            case "--allow-unsafe-eval": o.AllowUnsafeEval = true; break;
+            case "--history-window" when i + 1 < args.Length: o.HistoryWindow = int.Parse(args[++i]); break;
             case "--capture-dir" when i + 1 < args.Length: o.CaptureDir = args[++i]; o.Capture = true; break;
             case "--claude": o.Claude = true; break;
             case "--codex": o.Codex = true; break;
@@ -278,6 +285,8 @@ sealed class Options
     public bool DemoPerf { get; set; }
     public bool NoPerf { get; set; }
     public bool Capture { get; set; }
+    public bool AllowUnsafeEval { get; set; }
+    public int HistoryWindow { get; set; } = 4;
     public string? CaptureDir { get; set; }
     public bool Claude { get; set; }
     public bool Codex { get; set; }

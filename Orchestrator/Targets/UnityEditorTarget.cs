@@ -27,6 +27,7 @@ public sealed class UnityEditorTarget : IExecTarget
     private readonly string _projectPath;
     private readonly int _timeoutSec;
     private readonly string _label;
+    private readonly bool _allowUnsafeEval;   // 가드 우회(명시적 opt-in)
 
     public string Name => _label;
 
@@ -117,11 +118,17 @@ public sealed class UnityEditorTarget : IExecTarget
               passes comfortably but a per-call-allocating one does not.
         """;
 
-    public UnityEditorTarget(string unityExe, string projectPath, string label, int timeoutSec = 120)
+    public UnityEditorTarget(
+        string unityExe,
+        string projectPath,
+        string label,
+        bool allowUnsafeEval = false,
+        int timeoutSec = 120)
     {
         _unityExe = unityExe;
         _projectPath = projectPath;
         _label = label;
+        _allowUnsafeEval = allowUnsafeEval;
         _timeoutSec = timeoutSec;
     }
 
@@ -196,6 +203,11 @@ public sealed class UnityEditorTarget : IExecTarget
     // assert 스니펫은 통과 시 "OK", 실패 시 사유 문자열을 return 하도록 출력 계약으로 강제한다.
     private async Task<VerifyResult> VerifyPlayModeAsync(string assertCode, CancellationToken ct)
     {
+        // 실행 **전에** 위험한 호출을 거른다. 이건 모델의 잘못이므로 피드백으로 되돌린다.
+        var unsafeHits = _allowUnsafeEval ? Array.Empty<string>() : SnippetGuard.Inspect(assertCode);
+        if (unsafeHits.Count > 0)
+            return new VerifyResult(false, "", unsafeHits.Select(h => "안전 위반: " + h).ToArray());
+
         // 리컴파일 직후엔 도메인 리로드가 끝나야 플레이모드 진입이 받아들여진다.
         // 이걸 안 기다리면 진입이 조용히 거부되고, 루프가 그걸 "코드가 틀렸다"로 오해한다.
         await WaitUntilReadyAsync(ct);
@@ -339,13 +351,18 @@ public sealed class UnityEditorTarget : IExecTarget
             return new VerifyResult(false, perfJson, new[] { $"PERF 블록 해석 실패: {ex.Message}" });
         }
 
+        var snippet = PerfHarness.BuildSnippet(spec);
+        var unsafeHits = _allowUnsafeEval ? Array.Empty<string>() : SnippetGuard.Inspect(snippet);
+        if (unsafeHits.Count > 0)
+            return new VerifyResult(false, "", unsafeHits.Select(h => "안전 위반: " + h).ToArray());
+
         await WaitUntilReadyAsync(ct);
         if (!await EnterPlayModeAsync(ct))
             throw new InvalidOperationException("플레이모드 진입 실패 — 성능 측정을 수행할 수 없습니다.");
 
         try
         {
-            var (res, raw) = await EvalWithRetryAsync(PerfHarness.BuildSnippet(spec), ct);
+            var (res, raw) = await EvalWithRetryAsync(snippet, ct);
 
             if (!double.TryParse(raw, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out var elapsedMs))

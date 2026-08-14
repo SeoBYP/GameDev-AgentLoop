@@ -17,6 +17,18 @@ public sealed record LoopOptions
 
     /// <summary>성공 시 결과 화면을 캡처해 남길 디렉터리(지정 시에만 캡처).</summary>
     public string? CaptureDir { get; init; }
+
+    /// <summary>
+    /// 백엔드에 보낼 최근 대화 턴 수(목표 턴은 항상 유지). 0 이면 무제한.
+    ///
+    /// 왜 필요한가: 출력 계약이 "매번 전체 파일"이라 스텝마다 파일 전문이 히스토리에 쌓인다.
+    /// 6스텝이면 같은 파일이 6벌 — 컨텍스트·비용이 선형으로 터진다.
+    /// 오래된 시도는 최신 전체 파일로 대체되므로 버려도 안전하다.
+    /// </summary>
+    public int HistoryWindow { get; init; } = 4;
+
+    /// <summary>실행 로그(전체 에러 원문 등)를 남길 디렉터리. 모델에는 요약만 가고, 사람은 전문을 본다.</summary>
+    public string? RunLogDir { get; init; }
 }
 
 /// <summary>루프 종료 판정 결과.</summary>
