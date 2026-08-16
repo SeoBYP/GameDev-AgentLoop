@@ -16,6 +16,12 @@ using Orchestrator.Util;
 
 var opts = ParseArgs(args);
 
+if (opts.Help)
+{
+    Console.WriteLine(HelpText.Usage);
+    return 0;
+}
+
 // 1) Unity 프로젝트 루트 해석 (인자 → 환경변수 → cwd에서 위로 탐색)
 var projectPath = opts.ProjectPath
     ?? Environment.GetEnvironmentVariable("UNITY_PROJECT_PATH")
@@ -228,6 +234,7 @@ static Options ParseArgs(string[] args)
             case "--skills-dir" when i + 1 < args.Length: o.SkillsDir = args[++i]; break;
             case "--list-skills": o.ListSkills = true; break;
             case "--init": o.Init = true; break;
+            case "--help" or "-h" or "-?": o.Help = true; break;
             case "--print-prompt": o.PrintPrompt = true; break;
             case "--env-file" when i + 1 < args.Length: o.EnvFile = args[++i]; break;
             case "--target" when i + 1 < args.Length: o.Target = args[++i]; break;
@@ -322,6 +329,61 @@ static string ReadEditorVersion(string projectPath)
     return "unknown";
 }
 
+// ── 사용법 ───────────────────────────────────────────────────────────────────
+// CLI 표면은 영어로 둔다 — 오픈소스 도구의 첫 진입점이라 가장 넓게 읽혀야 한다.
+static class HelpText
+{
+    public const string Usage = """
+        agentloop — a closed loop that makes AI-written Unity code actually run.
+
+        USAGE
+          agentloop "<goal in natural language>" [options]
+          agentloop --init                       set up the target project for test-based verification
+          agentloop --demo                       prove the loop works, no API key needed
+
+        The Unity project is auto-detected by walking up from the current directory.
+        The target project must be OPEN in the Unity Editor (the pipeline server runs inside it).
+        Check with: unity pipeline list
+
+        BACKEND (the brain — pick one; defaults to the Anthropic API)
+          --claude                 use the Claude Code CLI (`claude -p`) — no API key needed
+          --codex                  use the Codex CLI (`codex exec`)      — no API key needed
+          --model <id>             model id for the chosen backend
+                                   (API backend needs ANTHROPIC_API_KEY)
+
+        TARGET (the hands)
+          --target unity|ugs       Unity Editor (default) or UGS Cloud Code
+          --project <path>         Unity project root (default: auto-detect, or UNITY_PROJECT_PATH)
+
+        VERIFICATION
+          --assert <c#>            supply your own runtime check instead of letting the model write one
+          --tests-only             verify only through compiled test files; never eval temp snippets
+          --no-perf                skip the performance budget stage
+          --capture                save a Game View screenshot as evidence on success
+          --max-steps <n>          give up after n repair attempts (default 6)
+
+        DOMAIN SKILLS
+          --skills off             disable domain rule checks
+          --skills-dir <path>      load skills from a different folder
+          --list-skills            show which skills and checks would apply
+
+        DEMOS (deterministic, no API key — each reproduces one class of failure)
+          --demo                   compile error       -> self-repair
+          --demo-play              compiles but behaves wrong
+          --demo-skills            violates a domain rule -> rejected before apply
+          --demo-perf              correct but allocates on the hot path
+          --demo-draw              fast but floods draw calls
+
+        DIAGNOSTICS
+          --print-prompt           show the assembled system prompt and exit
+          --history-window <n>     turns of history to send (default 4; 0 = unlimited)
+          --allow-unsafe-eval      bypass the static guard on eval snippets (not a sandbox either way)
+          -h, --help               show this help
+
+        Docs: https://github.com/SeoBYP/GameDev-AgentLoop
+        """;
+}
+
 // ── 옵션/데모 스크립트 ────────────────────────────────────────────────────────
 
 sealed class Options
@@ -346,6 +408,7 @@ sealed class Options
     public bool SkillsOff { get; set; }
     public bool ListSkills { get; set; }
     public bool Init { get; set; }
+    public bool Help { get; set; }
     public bool PrintPrompt { get; set; }
     public string? EnvFile { get; set; }
     public string? SkillsDir { get; set; }
