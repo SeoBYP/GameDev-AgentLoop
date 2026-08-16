@@ -127,6 +127,7 @@ dotnet run --project Orchestrator -- --target ugs --claude "일일 보상 지급
 |---|---|
 | [Orchestrator/](Orchestrator/README.md) | 루프 소유자 — 계약·백엔드·타깃·검증. **여기부터 보면 된다** |
 | [Skills/](Skills/README.md) | 도메인 지식 레이어 — 지침(예방) + 정적 검사(강제) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **실행 그래프와 학습 사이클** — 흐름도(Mermaid) |
 | [docs/DESIGN.md](docs/DESIGN.md) | 설계와 근거(Decision Log) — *왜* 이렇게 정했는지 |
 | [docs/WORKLOG.md](docs/WORKLOG.md) | 작업 로그 — 무엇을 하며 무엇에 부딪혔는지 |
 | [docs/UGS-INVOKE-DESIGN.md](docs/UGS-INVOKE-DESIGN.md) | UGS 호출 검증 설계·실측 |
