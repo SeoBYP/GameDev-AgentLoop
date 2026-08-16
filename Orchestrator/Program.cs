@@ -155,6 +155,7 @@ var loop = new AgentLoop(
         NoPerf = opts.NoPerf,
         CaptureDir = opts.Capture ? (opts.CaptureDir ?? Path.Combine(projectPath, "docs", "artifacts")) : null,
         HistoryWindow = opts.HistoryWindow,
+        VerifyMode = opts.TestsOnly ? VerifyMode.TestsOnly : VerifyMode.Auto,
         RunLogDir = Path.Combine(Path.GetTempPath(), "agentloop-runs", DateTime.Now.ToString("yyyyMMdd-HHmmss")),
     },
     selectedSkills);
@@ -199,6 +200,7 @@ static Options ParseArgs(string[] args)
             case "--no-perf": o.NoPerf = true; break;
             case "--capture": o.Capture = true; break;
             case "--allow-unsafe-eval": o.AllowUnsafeEval = true; break;
+            case "--tests-only": o.TestsOnly = true; break;
             case "--history-window" when i + 1 < args.Length: o.HistoryWindow = int.Parse(args[++i]); break;
             case "--capture-dir" when i + 1 < args.Length: o.CaptureDir = args[++i]; o.Capture = true; break;
             case "--claude": o.Claude = true; break;
@@ -286,6 +288,7 @@ sealed class Options
     public bool NoPerf { get; set; }
     public bool Capture { get; set; }
     public bool AllowUnsafeEval { get; set; }
+    public bool TestsOnly { get; set; }
     public int HistoryWindow { get; set; } = 4;
     public string? CaptureDir { get; set; }
     public bool Claude { get; set; }

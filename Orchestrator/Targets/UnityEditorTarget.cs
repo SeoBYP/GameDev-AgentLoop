@@ -82,6 +82,32 @@ public sealed class UnityEditorTarget : IExecTarget
             * Cover the edge cases the goal implies (clamping, bounds, invalid input).
             * Use `[UnityTest]` + `yield return null` when behavior unfolds over frames
               (movement, cooldowns, timers) — that is the only way to verify it honestly.
+            * **Input-driven behavior**: derive the test class from `InputTestFixture` and inject
+              virtual input instead of faking it with direct method calls:
+
+              public class JumpTests : InputTestFixture
+              {
+                  [UnityTest]
+                  public IEnumerator Space_Triggers_Jump()
+                  {
+                      var keyboard = InputSystem.AddDevice<Keyboard>();
+                      var go = new GameObject();
+                      var jump = go.AddComponent<Jumper>();
+
+                      Press(keyboard.spaceKey);
+                      yield return null;              // let the input be processed
+                      Release(keyboard.spaceKey);
+                      yield return null;
+
+                      Assert.IsTrue(jump.HasJumped);
+                      Object.Destroy(go);
+                  }
+              }
+
+              Available helpers: `Press`/`Release`/`PressAndRelease` (ButtonControl),
+              `Set(control, value)` (sticks/axes), `SetTouch(...)`.
+              Devices: `InputSystem.AddDevice<Keyboard>()` / `<Mouse>()` / `<Gamepad>()`.
+              `using UnityEngine.InputSystem;` is required; the test assembly already references it.
             * Do NOT emit an ASSERT block when you write tests.
 
         - If (and only if) you do NOT write tests, emit EXACTLY ONE runtime check as:

@@ -50,6 +50,10 @@ public sealed class AgentLoop
         var system = BuildSystemPrompt(_target, _skills);
         var history = new List<Turn> { new(Role.User, BuildInitialPrompt(goal)) };
 
+        // 이 실행에서 테스트 파일이 한 번이라도 적용됐는지.
+        // 이후 스텝이 구현만 고쳐 보내도 테스트는 이미 프로젝트에 있으므로 테스트 러너로 검증해야 한다.
+        var testsInProject = false;
+
         for (int step = 1; step <= _options.MaxSteps; step++)
         {
             _log($"\n──────── step {step}/{_options.MaxSteps} ────────");
@@ -116,9 +120,20 @@ public sealed class AgentLoop
             // ③-b 검증: 런타임 동작
             // 테스트 파일이 왔으면 **테스트 러너**로 검증한다(레포에 남는 자산 + 다중 프레임 가능).
             // 없으면 일회용 ASSERT 스니펫으로 대체한다. 사람이 준 assert 는 언제나 우선.
-            var hasTests = reply.Edits.Any(e => IsTestFile(e.RelativePath));
-            var useTests = hasTests && _options.Assert is null && _target.Supports(VerifyKind.Tests);
-            var assertCode = _options.Assert ?? EditParser.ParseAssert(reply.Text);
+            // 이번 응답에 테스트가 왔거나, 앞선 스텝에서 이미 적용해 뒀거나.
+            testsInProject |= reply.Edits.Any(e => IsTestFile(e.RelativePath));
+            var useTests = testsInProject && _options.Assert is null && _target.Supports(VerifyKind.Tests);
+            var testsOnly = _options.VerifyMode == VerifyMode.TestsOnly;
+
+            // TestsOnly: eval 을 아예 쓰지 않는다. 테스트가 없으면 통과시키지 않고 되돌려 요구한다.
+            if (testsOnly && !useTests)
+            {
+                _log("③ 검증  → 테스트 파일 없음 ❌ (tests-only 모드는 임시 스니펫을 실행하지 않습니다)");
+                history.Add(new Turn(Role.User, TestsRequiredFeedback));
+                continue;
+            }
+
+            var assertCode = testsOnly ? null : (_options.Assert ?? EditParser.ParseAssert(reply.Text));
 
             if (!useTests && (assertCode is null || !_target.Supports(VerifyKind.RuntimeAssert)))
             {
@@ -151,7 +166,9 @@ public sealed class AgentLoop
             _log($"③ 검증  → {runtimeLabel} 통과 ✅  {play.Log}");
 
             // ③-c 검증: 성능 예산 (프로파일링) — "동작 정상 ≠ 충분히 빠름"
-            var perfSpec = _options.NoPerf ? null : EditParser.ParsePerf(reply.Text);
+            // PERF 블록은 eval 로 측정하므로 tests-only 모드에서는 건너뛴다
+            // (성능 단언이 필요하면 테스트 파일 안에서 Stopwatch 로 하도록 지침에 명시).
+            var perfSpec = (_options.NoPerf || testsOnly) ? null : EditParser.ParsePerf(reply.Text);
             if (perfSpec is null || !_target.Supports(VerifyKind.Performance))
             {
                 // ⑤ 판정
@@ -216,6 +233,12 @@ public sealed class AgentLoop
     // 목표만 전달한다. 어떤 언어로 어디에 만들지는 타깃의 GenerationBrief 가 이미 시스템 프롬프트에 넣었다.
     private static string BuildInitialPrompt(string goal) =>
         $"목표: {goal}\n\n위 목표를 만족하는 파일을 출력 계약(FILE: + 펜스 코드블록) 형식으로 생성하세요.";
+
+    private const string TestsRequiredFeedback = """
+        이 실행은 **테스트 파일로만** 검증합니다(임시 스니펫은 실행하지 않습니다).
+        `Assets/Tests/PlayMode/<TypeName>Tests.cs` 를 FILE 블록으로 함께 출력하세요.
+        성능이 중요한 동작이면 테스트 안에서 Stopwatch 로 재고 Assert 하세요.
+        """;
 
     private const string NoEditsFeedback =
         "응답에서 FILE 블록을 하나도 찾지 못했습니다. 반드시 'FILE: <경로>' 다음 줄에 펜스 코드블록으로 전체 파일을 출력하세요.";

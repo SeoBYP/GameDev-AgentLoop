@@ -1,5 +1,21 @@
 namespace Orchestrator.Loop;
 
+/// <summary>
+/// 검증에 **임시 코드 실행(eval)** 을 허용할지.
+///
+///   Auto      — 테스트가 있으면 테스트로, 없으면 ASSERT/PERF 스니펫을 eval 로 실행(기본).
+///   TestsOnly — eval 을 아예 쓰지 않는다. 검증은 **컴파일된 테스트 파일**로만 한다.
+///
+/// TestsOnly 의 값: AI 가 만든 코드가 임시 스니펫이 아니라 **레포에 남는 리뷰 가능한 파일**로만
+/// 실행된다. git diff 에 걸리고, 사람이 읽을 수 있고, 되돌릴 수 있다.
+/// (이건 격리가 아니라 **감사 가능성**이다 — 진짜 격리는 OS 수준의 몫. DESIGN §6.12 참고)
+/// </summary>
+public enum VerifyMode
+{
+    Auto,
+    TestsOnly,
+}
+
 /// <summary>루프 가드/설정.</summary>
 public sealed record LoopOptions
 {
@@ -29,6 +45,9 @@ public sealed record LoopOptions
 
     /// <summary>실행 로그(전체 에러 원문 등)를 남길 디렉터리. 모델에는 요약만 가고, 사람은 전문을 본다.</summary>
     public string? RunLogDir { get; init; }
+
+    /// <summary>검증에 임시 코드 실행(eval)을 허용할지. TestsOnly 면 테스트 파일로만 검증한다.</summary>
+    public VerifyMode VerifyMode { get; init; } = VerifyMode.Auto;
 }
 
 /// <summary>루프 종료 판정 결과.</summary>

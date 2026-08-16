@@ -367,6 +367,63 @@ Assets/Tests/PlayMode/AgentLoop.Tests.asmdef ← Runtime + TestRunner + nunit �
 
 ---
 
+## 6.12 입력 시뮬레이션과 eval 격리
+
+### 입력 시뮬레이션 — 도구가 아니라 테스트 능력으로
+
+레퍼런스는 `simulate-mouse`/`simulate-keyboard` 같은 **전용 도구**로 입력을 넣는다.
+우리 pipeline 에는 그런 명령이 없다. 대신 **Input System 의 `InputTestFixture`** 를 쓰면
+PlayMode 테스트 안에서 **가상 장치를 만들어 입력을 주입**할 수 있다.
+
+우리 구조에는 이쪽이 더 맞다 — 입력 시뮬레이션이 **별도 검증 경로가 아니라 테스트가 할 수 있는 일**이 되고,
+`[UnityTest]`(시나리오 재생)와 자연스럽게 합쳐진다: *누르고 → 프레임 넘기고 → 결과 확인*.
+
+```
+Assets/Tests/PlayMode/AgentLoop.Tests.asmdef
+  references: Unity.InputSystem, Unity.InputSystem.TestFramework
+Assets/Scripts/AgentLoop.Runtime.asmdef
+  references: Unity.InputSystem
+```
+
+`InputTestFixture` 를 상속하면 `Press`/`Release`/`PressAndRelease`/`Set`/`SetTouch` 를 쓸 수 있고,
+장치는 `InputSystem.AddDevice<Keyboard>()` 등으로 만든다. 생성 지침에 이 패턴을 예시로 넣었다.
+
+**실측**: "스페이스바로 점프하고 0.5초 뒤 자동 착지" 목표 →
+모델이 `JumperTests : InputTestFixture` 를 만들어 `AddDevice<Keyboard>()` → `Press(spaceKey)` →
+프레임 진행 → 상태 확인. **step 1 에서 자동 착지 버그를 잡아(9/10) step 2 에 10/10 통과.**
+
+### eval 격리 — 할 수 있는 것과 없는 것을 나눈다
+
+**할 수 없는 것부터 분명히 한다.** `unity command eval` 은 **사용자의 에디터 프로세스 안에서** 실행된다.
+그 프로세스는 우리가 만들지도, 소유하지도 않는다. 따라서 **오케스트레이터 코드로는 eval 을 샌드박싱할 수 없다.**
+"프로세스 분리"를 구현했다고 말하는 건 거짓이 된다.
+
+**할 수 있는 것 — 임시 코드 실행 자체를 없앤다.**
+AI 가 만든 코드가 실행되는 경로는 두 갈래다:
+
+| 경로 | 실행 형태 | 감사 가능성 |
+|---|---|---|
+| `RuntimeAssert`·`Performance` | **임시 스니펫**을 eval 로 즉시 실행 | 남지 않음 |
+| `Tests` | **컴파일된 테스트 파일** | git 에 남고, diff 되고, 되돌릴 수 있음 |
+
+→ **`--tests-only`**: eval 경로를 아예 쓰지 않는다. 테스트가 없으면 통과시키지 않고 요구한다.
+이 모드에서 AI 가 만든 코드는 **전부 리뷰 가능한 파일**로만 실행된다.
+(성능 단언이 필요하면 테스트 안에서 `Stopwatch` 로 재도록 지침에 명시)
+
+**이건 격리가 아니라 감사 가능성이다.** 정직하게 구분해서 부른다:
+- `SnippetGuard`(§6.11) — 위험 API 정적 차단. **완화책**(리플렉션 우회 가능).
+- `--tests-only` — 임시 코드 실행 제거. **감사 가능성**(권한은 그대로).
+- **진짜 격리는 배포의 몫** — 아래.
+
+**진짜 격리 레시피(배포 수준)**: 에디터 프로세스가 가진 권한이 곧 blast radius다. 낮추려면
+- 전용 OS 계정으로 Unity 를 실행(사용자 홈·문서 접근 차단),
+- 또는 VM/컨테이너 안에서 프로젝트와 에디터를 함께 격리,
+- 리포지토리는 그 안에 체크아웃하고 결과만 밖으로 가져온다.
+
+오케스트레이터가 대신 해 줄 수 없는 부분이라 코드가 아니라 **운영 절차**로 문서화한다.
+
+---
+
 ## 7. 열린 질문 (나중에 결정)
 - ~~편집 형식: 전체 파일 덮어쓰기 vs 부분 패치(diff)?~~ → **전체 덮어쓰기로 확정**(§6.5).
 - ~~플레이모드 검증을 어디까지?~~ → **컴파일 + 런타임 assert 까지 구현**(§6.6). 시나리오 재생은 남음.

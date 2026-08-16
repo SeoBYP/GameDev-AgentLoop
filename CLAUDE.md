@@ -89,5 +89,10 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
     **레퍼런스처럼 "경로만 주기"는 불가** — 우리 백엔드는 도구 없는 텍스트 생성기라 못 읽는다.
   - `SnippetGuard`: eval 실행 전 위험 API 정적 차단(파일·프로세스·네트워크·레지스트리·에셋삭제·종료).
     위반은 모델 잘못이라 피드백. `--allow-unsafe-eval` 우회. **샌드박스 아님(리플렉션 우회 가능)**.
-- 다음: 입력 시뮬레이션, 드로우콜·메모리 예산 승격, eval 진짜 격리.
+- **입력 시뮬레이션 완료** — Input System `InputTestFixture` 로 PlayMode 테스트에서 가상 장치 입력 주입.
+  asmdef 참조: Tests ← `Unity.InputSystem`+`Unity.InputSystem.TestFramework`, Runtime ← `Unity.InputSystem`.
+  전용 도구가 아니라 **테스트가 하는 일**이라 `[UnityTest]`(시나리오)와 그대로 합쳐진다.
+- **eval 격리 = `--tests-only`(감사 가능성)** — eval 은 사용자 에디터 프로세스에서 돌아 **코드로 샌드박싱 불가**.
+  대신 임시 스니펫 실행을 없애고 **컴파일된 테스트 파일로만** 검증한다. 진짜 격리(전용 계정·VM)는 운영 절차로 문서화(DESIGN §6.12).
+- 다음: 드로우콜·메모리 예산 승격, 마우스·게임패드 입력 시나리오.
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)
