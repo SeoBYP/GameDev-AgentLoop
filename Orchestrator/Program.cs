@@ -85,6 +85,30 @@ if (opts.ListSkills)
     return 0;
 }
 
+// 1-b2) 벤치마크 목표는 **일찍** 읽는다 — 깨진 목표 파일을 에디터 연결 확인 뒤에 알려 줄 이유가 없고,
+//       90분짜리 실행이 시작 직후 죽는 것도 막는다.
+IReadOnlyList<BenchGoal>? benchGoals = null;
+if (opts.Bench)
+{
+    var goalsPath = opts.BenchGoals ?? Path.Combine(projectPath, "Benchmark", "goals.jsonl");
+    if (!File.Exists(goalsPath))
+    {
+        Console.Error.WriteLine($"No benchmark goals at {goalsPath}. Use --bench-goals <path>.");
+        return 2;
+    }
+
+    benchGoals = BenchGoal.Load(goalsPath)
+        .Where(g => opts.BenchSet is null or "all" || g.Set.Equals(opts.BenchSet, StringComparison.OrdinalIgnoreCase))
+        .Where(g => opts.BenchFilter is null || g.Id.Contains(opts.BenchFilter, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    if (benchGoals.Count == 0)
+    {
+        Console.Error.WriteLine("No goals matched the filter.");
+        return 2;
+    }
+}
+
 // 1-c) 손(타깃) 선택 — Unity 에디터(클라) vs UGS Cloud Code(백엔드)
 IExecTarget target;
 if (opts.Target.Equals("ugs", StringComparison.OrdinalIgnoreCase))
@@ -213,31 +237,12 @@ var loopOptions = new LoopOptions
 // 벤치마크 — 목표 세트를 통째로 돌려 비교 가능한 숫자를 만든다(ARCHITECTURE §10).
 if (opts.Bench)
 {
-    var goalsPath = opts.BenchGoals ?? Path.Combine(projectPath, "Benchmark", "goals.jsonl");
-    if (!File.Exists(goalsPath))
-    {
-        Console.Error.WriteLine($"No benchmark goals at {goalsPath}. Use --bench-goals <path>.");
-        return 2;
-    }
-
-    var allGoals = BenchGoal.Load(goalsPath);
-    var picked = allGoals
-        .Where(g => opts.BenchSet is null or "all" || g.Set.Equals(opts.BenchSet, StringComparison.OrdinalIgnoreCase))
-        .Where(g => opts.BenchFilter is null || g.Id.Contains(opts.BenchFilter, StringComparison.OrdinalIgnoreCase))
-        .ToList();
-
-    if (picked.Count == 0)
-    {
-        Console.Error.WriteLine("No goals matched the filter.");
-        return 2;
-    }
-
     var benchId = startedAt.ToString("yyyyMMdd-HHmmss");
     var benchRuns = Path.Combine(projectPath, ".agentloop", "bench", benchId);
     var benchOut = opts.BenchOut ?? Path.Combine(projectPath, "Benchmark", "results", benchId);
 
     var runner = new BenchRunner(backend, target, layout, projectPath, selectedSkills, loopOptions);
-    var summary = await runner.RunAsync(picked, benchId, benchRuns, opts.Model, cts.Token);
+    var summary = await runner.RunAsync(benchGoals!, benchId, benchRuns, opts.Model, cts.Token);
 
     Console.WriteLine(BenchRunner.Report(summary));
     Console.WriteLine($"📁 summary: {BenchRunner.WriteSummary(benchOut, summary)}");
