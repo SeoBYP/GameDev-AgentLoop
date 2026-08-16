@@ -237,6 +237,7 @@ agentloop --skills off       # 끄기
 | 경로 | 내용 |
 |---|---|
 | [docs/ARCHITECTURE.ko.md](docs/ARCHITECTURE.ko.md) | 실행 그래프·트레이스 트리·자기개선 설계 (Mermaid 흐름도) |
+| [Benchmark/](Benchmark/README.md) | 루프를 재는 목표 세트와, 왜 홀드아웃을 나누는지 |
 | [Orchestrator/](Orchestrator/README.md) | 루프 소유자 — 계약·백엔드·타깃·검증 |
 | [Skills/](Skills/README.md) | 도메인 지식 레이어 — 지침(예방) + 정적 검사(강제) |
 | [docs/DESIGN.md](docs/DESIGN.md) | 설계와 근거(Decision Log) — *왜* 이렇게 정했는지 |

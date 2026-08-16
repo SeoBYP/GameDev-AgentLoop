@@ -226,6 +226,7 @@ agentloop --skills off       # disable them
 | Path | Contents | Language |
 |---|---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Execution graph, trace tree, and self-improvement design (Mermaid diagrams) | EN · [KO](docs/ARCHITECTURE.ko.md) |
+| [Benchmark/](Benchmark/README.md) | The goal set the loop is measured against, and why it has a held-out split | EN |
 | [Orchestrator/](Orchestrator/README.md) | The loop itself — contracts, backends, targets, verification | 🇰🇷 |
 | [Skills/](Skills/README.md) | Domain knowledge layer — guidance and static checks | 🇰🇷 |
 | [docs/DESIGN.md](docs/DESIGN.md) | Decision log — *why* each choice was made | 🇰🇷 |

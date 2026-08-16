@@ -849,13 +849,25 @@ This project's identity is **"answer by measuring."**
 Self-improvement is unusually easy to fool yourself about (getting better only at the goals you
 trained on), so **the moment "it got smarter" is asserted on vibes, the credibility built so far is gone.**
 
+**[now]** `Benchmark/goals.jsonl` holds 18 goals — 12 `train`, 6 `holdout` —
+and `agentloop --bench` runs them and writes a comparable summary.
+
 ```
-Benchmark/goals.jsonl   # {id, goal, target, tags, holdout}
+Benchmark/goals.jsonl              # {id, set, tags, goal}
+Benchmark/results/<id>/summary.json  # tracked — the numbers
+.agentloop/bench/<id>/               # ignored — full span traces per goal
 ```
 
-- 15–20 goals, **split into training and held-out**
+- **split into training and held-out**; skills and budgets get tuned on `train`
 - Metrics: `success rate · mean steps · wall clock`
+- Mean steps counts **passing goals only** — failures are truncated at `--max-steps` and would
+  otherwise pull the mean in the flattering direction
+- Between goals the runner deletes the files that goal generated (never pre-existing ones) and
+  recompiles, so each goal starts from a clean project
 - Record a baseline first; every later improvement is stated **against the held-out set only**
+
+**[unmeasured]** the baseline itself. A full sweep needs a live editor and a real backend
+(~4 minutes per goal, measured on `cooldown-timer`), so it is a deliberate, ~90-minute run.
 
 The shape of the sentence to aim for:
 
@@ -871,7 +883,7 @@ The benchmark is also required by the outer loop (§2) — you need to compare
 | | Step | Why here |
 |---|---|---|
 | 0 | ~~**RunStore + span trace**~~ **[done]** | picking up material that used to be thrown away daily. Prerequisite for everything after |
-| 0 | **Benchmark + baseline** | without it, no later improvement is measurable |
+| 0 | **Benchmark** ~~(harness)~~ **[done]** · baseline still to record | without it, no later improvement is measurable |
 | 1 | **Extract nodes** | regression bar: the five demos must reach the **same verdicts** |
 | 2 | **Declared graph + policy** | targets declare their own subgraph; absorbs the scattered `Supports` branching |
 | 3 | **RED gate + TDD cycle** (§4) | blocks vacuous tests. Sits directly on the node contract |

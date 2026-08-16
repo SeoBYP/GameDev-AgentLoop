@@ -74,6 +74,16 @@ jobs:
           dotnet run --project Orchestrator -c Release --no-build -- \
             --show-trace --project /tmp/bare --runs-dir /tmp/runs
 
+      # The benchmark cannot run here (no editor), but a malformed goals.jsonl would only
+      # surface at the start of a 90-minute sweep. Parse it now.
+      - name: Benchmark goals parse
+        run: |
+          out=$(dotnet run --project Orchestrator -c Release --no-build -- \
+                  --demo --bench --bench-filter __definitely_no_match__ 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "No goals matched" \
+            || { echo "::error::goals.jsonl failed to parse"; exit 1; }
+
       # Regression guard: skills ship WITH the tool. If they are not in the package,
       # an installed copy runs with domain checks silently disabled.
       - name: Package bundles the skills

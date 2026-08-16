@@ -1,4 +1,5 @@
 using Orchestrator.Backends;
+using Orchestrator.Bench;
 using Orchestrator.Contracts;
 using Orchestrator.Loop;
 using Orchestrator.Skills;
@@ -209,6 +210,41 @@ var loopOptions = new LoopOptions
     RunsDir = opts.RunsDir,
 };
 
+// 벤치마크 — 목표 세트를 통째로 돌려 비교 가능한 숫자를 만든다(ARCHITECTURE §10).
+if (opts.Bench)
+{
+    var goalsPath = opts.BenchGoals ?? Path.Combine(projectPath, "Benchmark", "goals.jsonl");
+    if (!File.Exists(goalsPath))
+    {
+        Console.Error.WriteLine($"No benchmark goals at {goalsPath}. Use --bench-goals <path>.");
+        return 2;
+    }
+
+    var allGoals = BenchGoal.Load(goalsPath);
+    var picked = allGoals
+        .Where(g => opts.BenchSet is null or "all" || g.Set.Equals(opts.BenchSet, StringComparison.OrdinalIgnoreCase))
+        .Where(g => opts.BenchFilter is null || g.Id.Contains(opts.BenchFilter, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    if (picked.Count == 0)
+    {
+        Console.Error.WriteLine("No goals matched the filter.");
+        return 2;
+    }
+
+    var benchId = startedAt.ToString("yyyyMMdd-HHmmss");
+    var benchRuns = Path.Combine(projectPath, ".agentloop", "bench", benchId);
+    var benchOut = opts.BenchOut ?? Path.Combine(projectPath, "Benchmark", "results", benchId);
+
+    var runner = new BenchRunner(backend, target, layout, projectPath, selectedSkills, loopOptions);
+    var summary = await runner.RunAsync(picked, benchId, benchRuns, opts.Model, cts.Token);
+
+    Console.WriteLine(BenchRunner.Report(summary));
+    Console.WriteLine($"📁 summary: {BenchRunner.WriteSummary(benchOut, summary)}");
+    Console.WriteLine($"📁 runs:    {benchRuns}");
+    return summary.Results.All(r => r.Success) ? 0 : 1;
+}
+
 var loop = new AgentLoop(backend, target, loopOptions, selectedSkills, trace: trace);
 
 var wall = System.Diagnostics.Stopwatch.StartNew();
@@ -295,6 +331,11 @@ static Options ParseArgs(string[] args)
             case "--init": o.Init = true; break;
             case "--help" or "-h" or "-?": o.Help = true; break;
             case "--trace": o.ShowTrace = true; break;
+            case "--bench": o.Bench = true; break;
+            case "--bench-set" when i + 1 < args.Length: o.BenchSet = args[++i]; break;
+            case "--bench-filter" when i + 1 < args.Length: o.BenchFilter = args[++i]; break;
+            case "--bench-goals" when i + 1 < args.Length: o.BenchGoals = args[++i]; break;
+            case "--bench-out" when i + 1 < args.Length: o.BenchOut = args[++i]; break;
             case "--runs-dir" when i + 1 < args.Length: o.RunsDir = args[++i]; break;
             case "--show-trace": o.ShowTraceOnly = true; break;
             case "--show-trace-run" when i + 1 < args.Length: o.ShowTraceOnly = true; o.TraceRunDir = args[++i]; break;
@@ -459,6 +500,14 @@ static class HelpText
           --demo-perf              correct but allocates on the hot path
           --demo-draw              fast but floods draw calls
 
+        BENCHMARK (measure the loop itself, so later improvements can be proven)
+          --bench                  run every goal in Benchmark/goals.jsonl and report
+          --bench-set train|holdout|all
+                                   which split to run (default: all)
+          --bench-filter <text>    only goals whose id contains this
+          --bench-goals <path>     use a different goal file
+          --bench-out <dir>        where to write summary.json (default Benchmark/results/<id>/)
+
         RUN RECORDS
           Every run is recorded under <project>/.agentloop/runs/<runId>/ — a span trace,
           the model's raw replies, compiler output, and a manifest of the settings in effect.
@@ -506,6 +555,11 @@ sealed class Options
     public bool ShowTraceOnly { get; set; }
     public string? TraceRunDir { get; set; }
     public string? RunsDir { get; set; }
+    public bool Bench { get; set; }
+    public string? BenchSet { get; set; }
+    public string? BenchFilter { get; set; }
+    public string? BenchGoals { get; set; }
+    public string? BenchOut { get; set; }
     public bool PrintPrompt { get; set; }
     public string? EnvFile { get; set; }
     public string? SkillsDir { get; set; }
