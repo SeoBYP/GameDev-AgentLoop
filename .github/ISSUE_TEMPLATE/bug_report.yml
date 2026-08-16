@@ -1,0 +1,95 @@
+name: Bug report
+description: Something in the loop misbehaves
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The most useful thing you can include is **which verification layer
+        failed** — compile, tests/assert, or a budget — because that narrows it down immediately.
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran.
+      placeholder: agentloop --claude "a health component that clamps at both ends"
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Where it went wrong
+      options:
+        - Generation (wrong or malformed output from the model)
+        - Apply (files written to the wrong place, or rejected)
+        - Compile verification
+        - Runtime verification (tests or PlayMode assert)
+        - Performance / render budget
+        - Skills (a check fired wrongly, or failed to fire)
+        - Setup (--init, project detection, connecting to Unity)
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected vs. what happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Loop output
+      description: Paste the run output. Redact anything sensitive — never paste API keys.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: unity
+    attributes:
+      label: Unity version
+      placeholder: "6000.0.30f1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pipeline
+    attributes:
+      label: Did `unity pipeline list` show a reachable server?
+      description: If not, most verification steps will time out and that is the real cause.
+      options:
+        - "Yes"
+        - "No"
+        - "Did not check"
+    validations:
+      required: true
+
+  - type: input
+    id: backend
+    attributes:
+      label: Backend
+      placeholder: "--claude / --codex --model gpt-5.5 / API key"
+
+  - type: textarea
+    id: layout
+    attributes:
+      label: Project layout line
+      description: >
+        The `Project layout: ...` line the loop prints at startup. This tells us which assemblies
+        it detected, which is behind a lot of setup issues.
+      render: text
+
+  - type: dropdown
+    id: repro
+    attributes:
+      label: Is it reproducible?
+      options:
+        - "Every time"
+        - "Sometimes"
+        - "Saw it once"

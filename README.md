@@ -2,6 +2,7 @@
 
 [한국어](README_ko.md)
 
+[![CI](https://github.com/SeoBYP/GameDev-AgentLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/SeoBYP/GameDev-AgentLoop/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Unity](https://img.shields.io/badge/Unity-6000.x-black.svg?logo=unity)](https://unity.com/)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet)](https://dotnet.microsoft.com/)

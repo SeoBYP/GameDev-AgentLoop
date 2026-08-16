@@ -1,0 +1,63 @@
+name: Propose a verification layer, check, or budget
+description: A new way for the loop to catch bad output
+labels: [verification]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project's rule is that **it does not claim what it has not measured** — so a proposed
+        check needs evidence that it catches something real, and evidence that it does not fire on
+        code that is fine.
+
+        If the answers below are "I haven't measured yet", open it anyway and say so. An honest
+        unmeasured proposal is fine; an unmeasured proposal presented as proven is not.
+
+  - type: textarea
+    id: misses
+    attributes:
+      label: What does the loop currently let through?
+      description: Describe the bad output that passes verification today.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of check is this?
+      options:
+        - Skill check (static, rejects before applying)
+        - Runtime verification (behavior)
+        - Budget (time, render, structure, …)
+        - A new verification layer entirely
+    validations:
+      required: true
+
+  - type: textarea
+    id: caught
+    attributes:
+      label: A real example it catches
+      description: >
+        Ideally code an AI actually produced. "Models actually make this mistake" is the bar —
+        the first five checks written for this repo caught nothing, because modern models handle
+        the basics fine.
+      render: csharp
+    validations:
+      required: true
+
+  - type: textarea
+    id: falsepositives
+    attributes:
+      label: False positives
+      description: >
+        Run it against the existing generated code in `Assets/Scripts/`. How many hits, and are
+        any of them wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: cost
+    attributes:
+      label: Cost
+      description: >
+        Does it need the editor lease? Play mode? Roughly how much does it add to a run?
+        Anything requiring a live editor cannot run in CI.

@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# CI cannot run the five demos — they need a live Unity Editor with com.unity.pipeline.
+# What it CAN do is check everything that does not need the editor, and each check below
+# exists because the corresponding bug actually happened in this repo at least once.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The project holds a 0-warning standard, so make warnings fail the build.
+      - name: Build (warnings are errors)
+        run: dotnet build Orchestrator -c Release --nologo -warnaserror
+
+      - name: CLI entry point responds
+        run: dotnet run --project Orchestrator -c Release --no-build -- --help
+
+      # Regression guard: a malformed Skills/*.md used to load as "0 skills" silently,
+      # which disables domain checks without telling anyone.
+      - name: Skills load
+        run: |
+          out=$(dotnet run --project Orchestrator -c Release --no-build -- --list-skills)
+          echo "$out"
+          if echo "$out" | grep -q "no skills found"; then
+            echo "::error::No skills were loaded"; exit 1
+          fi
+          for s in unity-performance unity-pitfalls client-architecture; do
+            echo "$out" | grep -q "$s" || { echo "::error::skill '$s' failed to load"; exit 1; }
+          done
+
+      - name: System prompt assembles
+        run: |
+          out=$(dotnet run --project Orchestrator -c Release --no-build -- --print-prompt)
+          echo "$out" | grep -q "OUTPUT CONTRACT" || { echo "::error::Format contract missing"; exit 1; }
+          echo "$out" | grep -q "TARGET: Unity"   || { echo "::error::Target brief missing"; exit 1; }
+
+      # Regression guard: the generation brief used to hardcode this repo's assembly names,
+      # so a project without .asmdef files was told to write tests that could never compile.
+      - name: Degrades correctly on a project with no assembly definitions
+        run: |
+          mkdir -p /tmp/bare/Assets/Scripts /tmp/bare/ProjectSettings
+          echo "m_EditorVersion: 6000.0.30f1" > /tmp/bare/ProjectSettings/ProjectVersion.txt
+          out=$(dotnet run --project Orchestrator -c Release --no-build -- --print-prompt --project /tmp/bare)
+          echo "$out" | grep -q "no test assembly" \
+            || { echo "::error::Should fall back to ASSERT when there is no test assembly"; exit 1; }
+          echo "$out" | grep -q "AgentLoop.Runtime" \
+            && { echo "::error::This repo's assembly name leaked into another project's brief"; exit 1; }
+          echo "OK"
+
+      # Regression guard: skills ship WITH the tool. If they are not in the package,
+      # an installed copy runs with domain checks silently disabled.
+      - name: Package bundles the skills
+        run: |
+          dotnet pack Orchestrator -c Release --nologo -o ./nupkg
+          unzip -l ./nupkg/*.nupkg | tee /tmp/pkg.txt
+          for s in unity-performance unity-pitfalls client-architecture; do
+            grep -q "Skills/$s.md" /tmp/pkg.txt || { echo "::error::$s.md missing from the package"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: ./nupkg/*.nupkg

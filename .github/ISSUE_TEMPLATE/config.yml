@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Architecture and design rationale
+    url: https://github.com/SeoBYP/GameDev-AgentLoop/blob/main/docs/ARCHITECTURE.md
+    about: How the loop is structured, and what is planned versus already built.
+  - name: Contributing guide
+    url: https://github.com/SeoBYP/GameDev-AgentLoop/blob/main/CONTRIBUTING.md
+    about: Setup, the demo regression suite, and the one rule that matters.

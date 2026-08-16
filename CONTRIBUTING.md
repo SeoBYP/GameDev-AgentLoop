@@ -49,6 +49,12 @@ The five demos are the regression suite for the loop: they are deterministic (sc
 API key) and each one must reach the **same verdict** as before your change. If you touch the
 PlayMode tests, also run the Unity test suite.
 
+**CI cannot run the demos** — they need a live Unity Editor with `com.unity.pipeline`. What CI does
+check is everything that works without the editor: the build (warnings are errors), that skills load,
+that the system prompt assembles, that the brief degrades correctly on a project with no assembly
+definitions, and that the package bundles the skills. Every one of those exists because that exact
+bug happened here at least once.
+
 ## Adding a domain skill
 
 Skills live in `Skills/*.md` as portable markdown with two halves: `GUIDANCE` (injected into the
