@@ -58,6 +58,22 @@ jobs:
             && { echo "::error::This repo's assembly name leaked into another project's brief"; exit 1; }
           echo "OK"
 
+      # The run record is the substrate for replay and later learning, so a run that produces
+      # no trace is a silent loss. This asserts the store is written even when the run cannot
+      # reach a Unity editor (CI has none) — the failure path still has to be recorded.
+      - name: A run leaves a record behind
+        run: |
+          mkdir -p /tmp/bare/Assets/Scripts /tmp/bare/ProjectSettings
+          echo "m_EditorVersion: 6000.0.30f1" > /tmp/bare/ProjectSettings/ProjectVersion.txt
+          dotnet run --project Orchestrator -c Release --no-build -- \
+            --demo --project /tmp/bare --runs-dir /tmp/runs || true
+          test -d /tmp/runs || { echo "::error::no run directory was created"; exit 1; }
+          run=$(ls -d /tmp/runs/*/ | head -1)
+          test -f "$run/run.json" || { echo "::error::run.json missing"; exit 1; }
+          echo "--- run.json ---"; cat "$run/run.json"
+          dotnet run --project Orchestrator -c Release --no-build -- \
+            --show-trace --project /tmp/bare --runs-dir /tmp/runs
+
       # Regression guard: skills ship WITH the tool. If they are not in the package,
       # an installed copy runs with domain checks silently disabled.
       - name: Package bundles the skills

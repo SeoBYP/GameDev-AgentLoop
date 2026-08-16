@@ -43,8 +43,11 @@ public sealed record LoopOptions
     /// </summary>
     public int HistoryWindow { get; init; } = 4;
 
-    /// <summary>실행 로그(전체 에러 원문 등)를 남길 디렉터리. 모델에는 요약만 가고, 사람은 전문을 본다.</summary>
-    public string? RunLogDir { get; init; }
+    /// <summary>
+    /// 실행 기록을 남길 위치(기본 &lt;project&gt;/.agentloop/runs).
+    /// 전체 에러 원문은 span 산출물로 남는다 — 모델에는 요약만 가고, 사람은 전문을 본다.
+    /// </summary>
+    public string? RunsDir { get; init; }
 
     /// <summary>검증에 임시 코드 실행(eval)을 허용할지. TestsOnly 면 테스트 파일로만 검증한다.</summary>
     public VerifyMode VerifyMode { get; init; } = VerifyMode.Auto;

@@ -3,6 +3,7 @@ using Orchestrator.Contracts;
 using Orchestrator.Loop;
 using Orchestrator.Skills;
 using Orchestrator.Targets;
+using Orchestrator.Trace;
 using Orchestrator.Util;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +46,19 @@ var layout = ProjectLayout.Resolve(projectPath);
 
 if (opts.Init)
     return ProjectInit.Run(projectPath, layout);
+
+// 지난 실행의 트레이스를 트리로 다시 세워 본다(기본: 가장 최근 실행).
+if (opts.ShowTraceOnly)
+{
+    var dir = opts.TraceRunDir ?? RunStore.FindLatest(projectPath, opts.RunsDir);
+    if (dir is null)
+    {
+        Console.Error.WriteLine("No runs found. Run agentloop once first.");
+        return 2;
+    }
+    Console.WriteLine(TraceTree.Render(dir));
+    return 0;
+}
 
 // 1-b) 도메인 스킬 로드 (Phase 3) — 포터블 마크다운이라 모든 백엔드에 동일하게 적용된다.
 //      스킬은 **오케스트레이터와 함께 배포**된다. 대상 프로젝트의 Skills/ 는 있으면 우선한다
@@ -161,33 +175,60 @@ else
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
+// 실행 기록 — 학습 계층(Calibrator·Distiller)도 재개도 전부 이 기록 위에 선다.
+// %TEMP% 가 아니라 프로젝트 안에 남긴다: 매일 버리던 재료를 줍는 것이다(ARCHITECTURE §6.4).
+//
+// **연결 확인보다 먼저** 만든다. 인프라 실패(Fatal)도 결과이고, 기록되지 않으면
+// "왜 아무 일도 안 일어났는지"가 사라진다.
+var startedAt = DateTime.Now;
+var store = RunStore.Create(projectPath, opts.RunsDir, startedAt);
+var trace = new RunTrace(store);
+
 // 전제 확인: 손이 준비됐는가(에디터 연결 / UGS 인증). 안 되어 있으면 AI 호출 전에 빠르게 실패.
 if (!await target.IsConnectedAsync(cts.Token))
 {
     Console.Error.WriteLine(target.ConnectionHint);
+
+    using (var s = trace.Begin(SpanKind.Run, opts.Goal))
+        s.Fatal($"{target.Name} unreachable — {target.ConnectionHint.Split('\n')[0]}");
+
+    store.WriteManifest(NotStarted(store, startedAt, opts, backend, target, selectedSkills, layout,
+                                   "target unreachable"));
+    Console.Error.WriteLine($"📁 run: {store.Root}");
     return 2;
 }
 
-var loop = new AgentLoop(
-    backend,
-    target,
-    new LoopOptions
-    {
-        MaxSteps = opts.MaxSteps,
-        Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
-        NoPerf = opts.NoPerf,
-        CaptureDir = opts.Capture ? (opts.CaptureDir ?? Path.Combine(projectPath, "docs", "artifacts")) : null,
-        HistoryWindow = opts.HistoryWindow,
-        VerifyMode = opts.TestsOnly ? VerifyMode.TestsOnly : VerifyMode.Auto,
-        RunLogDir = Path.Combine(Path.GetTempPath(), "agentloop-runs", DateTime.Now.ToString("yyyyMMdd-HHmmss")),
-    },
-    selectedSkills);
+var loopOptions = new LoopOptions
+{
+    MaxSteps = opts.MaxSteps,
+    Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
+    NoPerf = opts.NoPerf,
+    CaptureDir = opts.Capture ? (opts.CaptureDir ?? Path.Combine(store.Root, "evidence")) : null,
+    HistoryWindow = opts.HistoryWindow,
+    VerifyMode = opts.TestsOnly ? VerifyMode.TestsOnly : VerifyMode.Auto,
+    RunsDir = opts.RunsDir,
+};
 
+var loop = new AgentLoop(backend, target, loopOptions, selectedSkills, trace: trace);
+
+var wall = System.Diagnostics.Stopwatch.StartNew();
+LoopResult? outcome = null;
 try
 {
+    var runSpan = trace.Begin(SpanKind.Run, opts.Goal);
     var result = await loop.RunAsync(opts.Goal, cts.Token);
+    outcome = result;
+    if (result.Success) runSpan.Pass(result.Summary); else runSpan.Fail(log: result.Summary);
+    runSpan.Dispose();
+
     Console.WriteLine();
     Console.WriteLine(result.Success ? $"✅ SUCCESS — {result.Summary}" : $"❌ FAILED — {result.Summary}");
+    Console.WriteLine($"📁 run: {store.Root}");
+    if (opts.ShowTrace)
+    {
+        Console.WriteLine();
+        Console.WriteLine(TraceTree.Render(store.Root));
+    }
     return result.Success ? 0 : 1;
 }
 catch (OperationCanceledException)
@@ -203,6 +244,24 @@ catch (Exception ex)
 }
 finally
 {
+    // 실패·중단이어도 남긴다 — 실패한 실행이야말로 학습 재료다.
+    store.WriteManifest(new RunManifest(
+        RunId: store.RunId,
+        StartedAt: startedAt.ToString("o"),
+        Goal: opts.Goal,
+        Backend: backend.Name,
+        Target: target.Name,
+        Model: opts.Model,
+        MaxSteps: opts.MaxSteps,
+        VerifyMode: loopOptions.VerifyMode.ToString(),
+        HistoryWindow: opts.HistoryWindow,
+        Skills: selectedSkills.Select(s => s.Name).ToList(),
+        ProjectLayout: layout.Describe(),
+        Success: outcome?.Success ?? false,
+        Steps: outcome?.Steps ?? 0,
+        Summary: outcome?.Summary ?? "interrupted",
+        WallClockMs: Math.Round(wall.Elapsed.TotalMilliseconds, 1)));
+
     (backend as IDisposable)?.Dispose();
 }
 
@@ -235,6 +294,10 @@ static Options ParseArgs(string[] args)
             case "--list-skills": o.ListSkills = true; break;
             case "--init": o.Init = true; break;
             case "--help" or "-h" or "-?": o.Help = true; break;
+            case "--trace": o.ShowTrace = true; break;
+            case "--runs-dir" when i + 1 < args.Length: o.RunsDir = args[++i]; break;
+            case "--show-trace": o.ShowTraceOnly = true; break;
+            case "--show-trace-run" when i + 1 < args.Length: o.ShowTraceOnly = true; o.TraceRunDir = args[++i]; break;
             case "--print-prompt": o.PrintPrompt = true; break;
             case "--env-file" when i + 1 < args.Length: o.EnvFile = args[++i]; break;
             case "--target" when i + 1 < args.Length: o.Target = args[++i]; break;
@@ -266,6 +329,28 @@ static Options ParseArgs(string[] args)
     }
     return o;
 }
+
+// 시작도 못 한 실행의 요약. 실패한 실행이야말로 학습 재료라 기록은 남긴다.
+static RunManifest NotStarted(
+    RunStore store, DateTime startedAt, Options o,
+    IAgentBackend backend, IExecTarget target,
+    IReadOnlyList<Skill> skills, ProjectLayout layout, string reason)
+    => new(
+        RunId: store.RunId,
+        StartedAt: startedAt.ToString("o"),
+        Goal: o.Goal,
+        Backend: backend.Name,
+        Target: target.Name,
+        Model: o.Model,
+        MaxSteps: o.MaxSteps,
+        VerifyMode: (o.TestsOnly ? VerifyMode.TestsOnly : VerifyMode.Auto).ToString(),
+        HistoryWindow: o.HistoryWindow,
+        Skills: skills.Select(s => s.Name).ToList(),
+        ProjectLayout: layout.Describe(),
+        Success: false,
+        Steps: 0,
+        Summary: reason,
+        WallClockMs: 0);
 
 // 스킬 디렉터리 해석 — 대상 프로젝트의 Skills/ 가 있으면 우선, 없으면 오케스트레이터와 함께 배포된 것.
 // (dev: bin/Debug/netX/ 에서 위로 올라가며 찾는다. 설치본: 실행 파일 옆.)
@@ -374,6 +459,14 @@ static class HelpText
           --demo-perf              correct but allocates on the hot path
           --demo-draw              fast but floods draw calls
 
+        RUN RECORDS
+          Every run is recorded under <project>/.agentloop/runs/<runId>/ — a span trace,
+          the model's raw replies, compiler output, and a manifest of the settings in effect.
+          --trace                  print the span tree after the run finishes
+          --show-trace             print the span tree of the most recent run and exit
+          --show-trace-run <dir>   print the span tree of a specific run directory
+          --runs-dir <path>        store run records somewhere else
+
         DIAGNOSTICS
           --print-prompt           show the assembled system prompt and exit
           --history-window <n>     turns of history to send (default 4; 0 = unlimited)
@@ -409,6 +502,10 @@ sealed class Options
     public bool ListSkills { get; set; }
     public bool Init { get; set; }
     public bool Help { get; set; }
+    public bool ShowTrace { get; set; }
+    public bool ShowTraceOnly { get; set; }
+    public string? TraceRunDir { get; set; }
+    public string? RunsDir { get; set; }
     public bool PrintPrompt { get; set; }
     public string? EnvFile { get; set; }
     public string? SkillsDir { get; set; }

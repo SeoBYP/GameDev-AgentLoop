@@ -110,6 +110,35 @@ agentloop --demo-draw    # fast, but floods draw calls
 
 Run `agentloop --help` for the full option list.
 
+### Every run is recorded
+
+Runs are written to `<project>/.agentloop/runs/<runId>/` — a span trace, the model's raw replies,
+compiler output, and a manifest of the settings that were in effect. That record is the substrate
+everything else is built on: replaying what happened, and later learning from it.
+
+```bash
+agentloop --demo-perf --trace   # print the span tree when the run finishes
+agentloop --show-trace          # rebuild and print the most recent run's tree
+```
+
+```
+run 20260817-004257  "A ScoreTracker component; Record(int) may be called every fr…"  ✅ 2 step(s), 66.7s
+  backend scripted:demo · target unity:6000.5.4f1 · skills client-architecture,unity-performance,unity-pitfalls
+├─ phase step 1                                      ✅   34.1s
+│  ├─ Generate                                       ✅     9ms  1 file edit(s)  → spans/s003/reply.txt
+│  ├─ SkillCheck                                     ✅     7ms  9 checks
+│  ├─ Apply                                          ✅   561ms  applied 1 file(s), recompile triggered
+│  ├─ VerifyCompile                                  ✅    1.9s
+│  ├─ VerifyAssert                                   ✅   19.4s  AI-written
+│  └─ VerifyPerf                                     ❌   12.0s  50000 calls in 50.27ms  [1 error(s)]
+└─ phase step 2
+   └─ VerifyPerf                                     ✅   12.2s  50000 calls in 14.31ms
+```
+
+Each span carries **whose fault** an outcome was — the model's, the infrastructure's, or nobody's —
+so aggregating a run tells you where the time and the mistakes actually went. See
+[ARCHITECTURE §6](docs/ARCHITECTURE.md).
+
 ---
 
 ## How it works

@@ -109,6 +109,34 @@ agentloop --demo-draw    # 빠르지만 드로우콜 폭증
 
 전체 옵션은 `agentloop --help`.
 
+### 모든 실행이 기록된다
+
+실행 기록은 `<project>/.agentloop/runs/<runId>/` 에 남는다 — span 트레이스, 모델의 응답 원문,
+컴파일 출력, 그리고 그때 적용된 설정 스냅샷. 이 기록이 이후 모든 것의 기질이다:
+무슨 일이 있었는지 재구성하고, 나중엔 거기서 배운다.
+
+```bash
+agentloop --demo-perf --trace   # 실행이 끝나면 span 트리를 출력
+agentloop --show-trace          # 가장 최근 실행의 트리를 다시 세워 출력
+```
+
+```
+run 20260817-004257  "A ScoreTracker component; Record(int) may be called every fr…"  ✅ 2 step(s), 66.7s
+  backend scripted:demo · target unity:6000.5.4f1 · skills client-architecture,unity-performance,unity-pitfalls
+├─ phase step 1                                      ✅   34.1s
+│  ├─ Generate                                       ✅     9ms  1 file edit(s)  → spans/s003/reply.txt
+│  ├─ SkillCheck                                     ✅     7ms  9 checks
+│  ├─ Apply                                          ✅   561ms  applied 1 file(s), recompile triggered
+│  ├─ VerifyCompile                                  ✅    1.9s
+│  ├─ VerifyAssert                                   ✅   19.4s  AI-written
+│  └─ VerifyPerf                                     ❌   12.0s  50000 calls in 50.27ms  [1 error(s)]
+└─ phase step 2
+   └─ VerifyPerf                                     ✅   12.2s  50000 calls in 14.31ms
+```
+
+span 마다 **누구 잘못인지**(모델·인프라·아무도 아님)가 붙어 있어서, 한 실행을 집계하면
+시간과 실수가 실제로 어디로 갔는지가 그냥 나온다. [ARCHITECTURE §6](docs/ARCHITECTURE.ko.md) 참고.
+
 ---
 
 ## 어떻게 동작하나

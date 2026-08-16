@@ -447,26 +447,40 @@ Waiting is a first-class thing to record.
 
 ### 6.2 One run's tree
 
-**[planned]** what the trace visualization (§11, build order step 4) will generate:
+**[now]** Actual output of `agentloop --demo-perf --trace` — the `Work`, `RED`/`GREEN`, and `Lease`
+levels are not populated yet (§11 steps 3 and 5), so today the tree is `Run → step → node`:
 
 ```
-run 20260816-1442  "quest rewards land in the inventory"                     ✅ 6m12s
+run 20260817-004257  "A ScoreTracker component; Record(int) may be called every fr…"  ✅ 2 step(s), 66.7s
+  backend scripted:demo · target unity:6000.5.4f1 · skills client-architecture,unity-performance,unity-pitfalls
+A ScoreTracker component; Record(int) may be called… ✅   66.7s  behavior AND performance verified in 2 step(s)
+├─ phase step 1                                      ✅   34.1s
+│  ├─ Generate                                       ✅     9ms  1 file edit(s)  → spans/s003/reply.txt
+│  ├─ SkillCheck                                     ✅     7ms  9 checks
+│  ├─ Apply                                          ✅   561ms  applied 1 file(s), recompile triggered
+│  ├─ VerifyCompile                                  ✅    1.9s
+│  ├─ VerifyAssert                                   ✅   19.4s  AI-written
+│  └─ VerifyPerf                                     ❌   12.0s  50000 calls in 50.27ms  [1 error(s)]
+└─ phase step 2
+   ├─ …
+   └─ VerifyPerf                                     ✅   12.2s  50000 calls in 14.31ms
+```
+
+**[planned]** once decomposition and the TDD cycle land, the same tree gains its outer levels:
+
+```
+run …                                                                        ✅ 6m12s
 ├─ work  contract · ItemId / IInventory                                      ✅ 1m03s
 │  ├─ RED    skeleton + test                                                 ✅ 41s
-│  │  ├─ Generate        claude                                              ✅ 28s
-│  │  ├─ lease  editor   waited 0s                                           ✅
-│  │  ├─ Apply                                                               ✅ 0.3s
-│  │  ├─ VerifyCompile                                                       ✅ 9s
+│  │  ├─ Generate · Apply · VerifyCompile                                    ✅
 │  │  └─ RedGate         does the test fail?                                 ✅ 3s
 │  └─ GREEN                                                                  ✅ 22s
 ├─ work  Inventory.TryAdd                                                    ✅ 2m28s
-│  ├─ RED    (2 attempts)                                                    ✅
+│  ├─ RED    (2 attempts)
 │  │  └─ RedGate         Fail — passed with no implementation (vacuous test)
-│  ├─ GREEN                                                                  ✅
 │  └─ REFACTOR  structure budget  public surface 7→3                         ✅
-└─ work  reward payout integration                                           ✅ 2m41s
-   ├─ lease  editor      waited 1m14s  ← held by session B                   ⏳
-   └─ ...
+└─ work  reward payout integration
+   └─ lease  editor      waited 1m14s  ← held by session B                   ⏳
 ```
 
 This one tree answers:
@@ -493,18 +507,22 @@ just an error string, not a learning signal — and the re-planning feedback in 
 
 ### 6.4 RunStore
 
-**[now]** run logs go to `%TEMP%/agentloop-runs/`. In other words the hardest-to-obtain data there is —
-*what the model got wrong and what fixed it* — is produced and then left for the OS to delete.
-
-**[planned]** move to `.agentloop/` at the repo root (gitignored).
+**[now]** Every run is recorded under the project's `.agentloop/runs/` (gitignored).
+Run logs used to go to `%TEMP%` — the hardest-to-obtain data there is, *what the model got wrong and
+what fixed it*, was produced and then left for the OS to delete.
 
 ```
 .agentloop/runs/<runId>/
   run.json          # goal · backend · target · option snapshot · verdict · wall clock
   trace.jsonl       # Span stream (append-only; the tree is rebuilt from ParentSpanId)
   spans/<spanId>/   # large artifacts hang off their span
-    reply.txt · edits/*.cs · compile.log · test-result.json
+    reply.txt · compile.log · runtime.log
   evidence/*.png
+```
+
+```bash
+agentloop --demo --trace     # print the span tree when the run finishes
+agentloop --show-trace       # rebuild and print the most recent run's tree
 ```
 
 - `run.json` snapshots **the skills and budgets in effect at the time** — otherwise later comparison is meaningless.
@@ -852,7 +870,7 @@ The benchmark is also required by the outer loop (§2) — you need to compare
 
 | | Step | Why here |
 |---|---|---|
-| 0 | **RunStore + span trace** | picking up material currently thrown away daily. Prerequisite for everything after |
+| 0 | ~~**RunStore + span trace**~~ **[done]** | picking up material that used to be thrown away daily. Prerequisite for everything after |
 | 0 | **Benchmark + baseline** | without it, no later improvement is measurable |
 | 1 | **Extract nodes** | regression bar: the five demos must reach the **same verdicts** |
 | 2 | **Declared graph + policy** | targets declare their own subgraph; absorbs the scattered `Supports` branching |

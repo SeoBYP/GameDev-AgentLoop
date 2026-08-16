@@ -438,26 +438,40 @@ public sealed record Span(
 
 ### 6.2 한 실행의 트리
 
-**[계획]** 트레이스 시각화(§11 구축 순서 4단계)가 자동 생성할 모양:
+**[현재]** `agentloop --demo-perf --trace` 의 실제 출력. `Work`·`RED/GREEN`·`Lease` 층은 아직
+채워지지 않아(§11 3·5단계) 지금은 `Run → step → node` 다:
 
 ```
-run 20260816-1442  "퀘스트 보상이 인벤토리에 들어간다"                  ✅ 6m12s
+run 20260817-004257  "A ScoreTracker component; Record(int) may be called every fr…"  ✅ 2 step(s), 66.7s
+  backend scripted:demo · target unity:6000.5.4f1 · skills client-architecture,unity-performance,unity-pitfalls
+A ScoreTracker component; Record(int) may be called… ✅   66.7s  behavior AND performance verified in 2 step(s)
+├─ phase step 1                                      ✅   34.1s
+│  ├─ Generate                                       ✅     9ms  1 file edit(s)  → spans/s003/reply.txt
+│  ├─ SkillCheck                                     ✅     7ms  9 checks
+│  ├─ Apply                                          ✅   561ms  applied 1 file(s), recompile triggered
+│  ├─ VerifyCompile                                  ✅    1.9s
+│  ├─ VerifyAssert                                   ✅   19.4s  AI-written
+│  └─ VerifyPerf                                     ❌   12.0s  50000 calls in 50.27ms  [1 error(s)]
+└─ phase step 2
+   ├─ …
+   └─ VerifyPerf                                     ✅   12.2s  50000 calls in 14.31ms
+```
+
+**[계획]** 분해와 TDD 사이클이 들어오면 같은 트리에 바깥 층이 붙는다:
+
+```
+run …                                                                ✅ 6m12s
 ├─ work  계약 · ItemId / IInventory                                   ✅ 1m03s
 │  ├─ RED    스켈레톤 + 테스트                                        ✅ 41s
-│  │  ├─ Generate        claude                                      ✅ 28s
-│  │  ├─ lease  editor   대기 0s                                     ✅
-│  │  ├─ Apply                                                       ✅ 0.3s
-│  │  ├─ VerifyCompile                                               ✅ 9s
+│  │  ├─ Generate · Apply · VerifyCompile                             ✅
 │  │  └─ RedGate         테스트가 실패하는가                          ✅ 3s
 │  └─ GREEN                                                          ✅ 22s
 ├─ work  Inventory.TryAdd                                            ✅ 2m28s
-│  ├─ RED    (2회)                                                   ✅
+│  ├─ RED    (2회)
 │  │  └─ RedGate         Fail — 구현이 없는데 통과함(헛테스트)
-│  ├─ GREEN                                                          ✅
 │  └─ REFACTOR  구조 예산  public 표면 7→3                            ✅
-└─ work  보상 지급 연동                                              ✅ 2m41s
-   ├─ lease  editor      대기 1m14s  ← 세션 B 보유                    ⏳
-   └─ ...
+└─ work  보상 지급 연동
+   └─ lease  editor      대기 1m14s  ← 세션 B 보유                    ⏳
 ```
 
 이 트리 하나로 답이 나오는 것들:
@@ -484,18 +498,22 @@ run 20260816-1442  "퀘스트 보상이 인벤토리에 들어간다"           
 
 ### 6.4 RunStore
 
-**[현재]** 실행 로그는 `%TEMP%/agentloop-runs/` 로 간다. 즉 *"모델이 무엇을 틀렸고
-무엇으로 고쳐서 통과했는가"* 라는 제일 구하기 힘든 데이터를 만들어 놓고 OS 가 지우게 두고 있다.
-
-**[계획]** 레포 루트의 `.agentloop/` 로 옮긴다(gitignore).
+**[현재]** 모든 실행이 프로젝트의 `.agentloop/runs/` 아래 기록된다(gitignore).
+예전엔 `%TEMP%` 로 갔다 — *"모델이 무엇을 틀렸고 무엇으로 고쳐서 통과했는가"* 라는
+제일 구하기 힘든 데이터를 만들어 놓고 OS 가 지우게 두고 있었다.
 
 ```
 .agentloop/runs/<runId>/
   run.json          # 목표·백엔드·타깃·옵션 스냅샷·판정·벽시계
   trace.jsonl       # Span 스트림 (append-only, ParentSpanId 로 트리 복원)
   spans/<spanId>/   # 큰 산출물은 span 에 매달아 둔다
-    reply.txt · edits/*.cs · compile.log · test-result.json
+    reply.txt · compile.log · runtime.log
   evidence/*.png
+```
+
+```bash
+agentloop --demo --trace     # 실행이 끝나면 span 트리를 출력
+agentloop --show-trace       # 가장 최근 실행의 트리를 다시 세워 출력
 ```
 
 - `run.json` 이 **그때의 스킬·예산까지 스냅샷**한다. 안 그러면 나중에 비교가 무의미해진다.
@@ -822,7 +840,7 @@ Benchmark/goals.jsonl   # {id, goal, target, tags, holdout}
 
 | | 단계 | 왜 이 순서인가 |
 |---|---|---|
-| 0 | **RunStore + Span 트레이스** | 지금 매일 버리고 있는 재료를 줍는 것. 모든 후속 단계의 전제 |
+| 0 | ~~**RunStore + Span 트레이스**~~ **[완료]** | 매일 버리던 재료를 줍는 것. 모든 후속 단계의 전제 |
 | 0 | **벤치마크 + 베이스라인** | 이게 없으면 이후 어떤 개선도 측정 불가 |
 | 1 | **노드 추출** | 회귀 기준: 데모 5종이 **같은 판정**을 내야 함 |
 | 2 | **그래프 선언 · 정책** | 타깃이 자기 서브그래프를 선언, `Supports` 분기 흡수 |

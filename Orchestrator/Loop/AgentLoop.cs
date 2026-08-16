@@ -1,5 +1,6 @@
 using Orchestrator.Contracts;
 using Orchestrator.Skills;
+using Orchestrator.Trace;
 using Orchestrator.Util;
 
 namespace Orchestrator.Loop;
@@ -24,20 +25,27 @@ public sealed class AgentLoop
     private readonly LoopOptions _options;
     private readonly IReadOnlyList<Skill> _skills;
     private readonly Action<string> _log;
+    private readonly RunTrace? _trace;
 
     public AgentLoop(
         IAgentBackend backend,
         IExecTarget target,
         LoopOptions options,
         IReadOnlyList<Skill>? skills = null,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        RunTrace? trace = null)
     {
         _backend = backend;
         _target = target;
         _options = options;
         _skills = skills ?? Array.Empty<Skill>();
         _log = log ?? Console.WriteLine;
+        _trace = trace;
     }
+
+    // 트레이스가 없으면(레거시 호출) 아무것도 기록하지 않는 더미 스코프를 쓴다 —
+    // 호출부가 매번 null 검사를 하지 않도록.
+    private SpanScope? Begin(SpanKind kind, string name) => _trace?.Begin(kind, name);
 
     public async Task<LoopResult> RunAsync(string goal, CancellationToken ct)
     {
@@ -57,26 +65,32 @@ public sealed class AgentLoop
         for (int step = 1; step <= _options.MaxSteps; step++)
         {
             _log($"\n──────── step {step}/{_options.MaxSteps} ────────");
+            using var stepSpan = Begin(SpanKind.Phase, $"step {step}");
 
             // ① 생성 — 오래된 시도는 잘라 보낸다(계약이 "매번 전체 파일"이라 최신 것만 있으면 충분).
             var sent = Trim(history);
             _log($"  (context {Feedback.ApproxChars(system, sent.Select(t => t.Content)):N0} chars / {sent.Count} turns)");
 
+            var genSpan = Begin(SpanKind.Node, "Generate");
             var reply = await _backend.CompleteAsync(new AgentContext(system, sent), ct);
             history.Add(new Turn(Role.Assistant, reply.Text));
             _log($"① generate → {reply.Edits.Count} file edit(s)");
+            genSpan?.Artifact("reply.txt", reply.Text);
 
             if (reply.Edits.Count == 0)
             {
                 _log("   (no FILE block parsed — asking again for the format)");
+                genSpan?.Fail(log: "no FILE block parsed").Dispose();
                 history.Add(new Turn(Role.User, NoEditsFeedback));
                 continue;
             }
+            genSpan?.Pass($"{reply.Edits.Count} file edit(s)  [{_backend.Name}]").Dispose();
 
             // ①-b 스킬 정적 검사 — 프로젝트에 적용하기 **전에** 품질 위반을 거른다.
             // 지침을 프롬프트로 주는 데서 그치지 않고 검사로 강제하는 게 Phase 3 의 핵심이다.
             if (_skills.Count > 0)
             {
+                using var skillSpan = Begin(SpanKind.Node, "SkillCheck");
                 var violations = SkillLibrary.Inspect(_skills, reply.Edits);
                 if (violations.Count > 0)
                 {
@@ -84,24 +98,32 @@ public sealed class AgentLoop
                     foreach (var v in violations.Take(5))
                         _log($"      · {v}");
 
+                    skillSpan?.Fail(violations.Select(v => $"{v.FilePath}: {v.Message}").ToList(),
+                                    $"{violations.Count} violation(s)");
+
                     // ④ 피드백 → 다음 스텝 ①로
                     history.Add(new Turn(Role.User, BuildViolationFeedback(violations)));
                     continue;
                 }
                 _log("①-b check  → skills passed ✅");
+                skillSpan?.Pass($"{_skills.Sum(s => s.Checks.Count)} checks");
             }
 
             // ② 적용
+            var applySpan = Begin(SpanKind.Node, "Apply");
             var apply = await _target.ApplyAsync(reply.Edits, ct);
             _log($"② apply    → {apply.Message}");
             if (!apply.Ok)
             {
+                applySpan?.Fail(log: apply.Message).Dispose();
                 history.Add(new Turn(Role.User,
                     $"Apply failed: {apply.Message}. Fix the path and emit the files again."));
                 continue;
             }
+            applySpan?.Pass(apply.Message).Dispose();
 
             // ③-a 검증: 컴파일
+            var compileSpan = Begin(SpanKind.Node, "VerifyCompile");
             var verify = await _target.VerifyAsync(new VerifySpec(VerifyKind.Compile), ct);
             if (!verify.Ok)
             {
@@ -109,14 +131,16 @@ public sealed class AgentLoop
                 foreach (var e in verify.Errors.Take(5))
                     _log($"      · {Feedback.Clip(e, 200)}");
 
-                // 모델에는 상위 N건만 가지만, 사람이 볼 전문은 파일로 남긴다.
-                WriteRunLog(step, "compile", string.Join("\n", verify.Errors) + "\n\n---\n" + verify.Log);
+                // 모델에는 상위 N건만 가지만, 사람이 볼 전문은 span 에 매달아 둔다.
+                compileSpan?.Artifact("compile.log", string.Join("\n", verify.Errors) + "\n\n---\n" + verify.Log)
+                            .Fail(verify.Errors, Feedback.Clip(verify.Errors[0], 90)).Dispose();
 
                 // ④ 피드백 → 다음 스텝 ①로
                 history.Add(new Turn(Role.User, BuildErrorFeedback(verify.Errors)));
                 continue;
             }
             _log($"③ verify   → {_target.LabelFor(VerifyKind.Compile)} passed ✅");
+            compileSpan?.Pass().Dispose();
 
             // ③-b 검증: 런타임 동작
             // 테스트 파일이 왔으면 **테스트 러너**로 검증한다(레포에 남는 자산 + 다중 프레임 가능).
@@ -130,6 +154,7 @@ public sealed class AgentLoop
             if (testsOnly && !useTests)
             {
                 _log("③ verify   → no test file ❌ (tests-only mode never runs temporary snippets)");
+                Begin(SpanKind.Node, "VerifyTests")?.Fail(log: "no test file (tests-only)").Dispose();
                 history.Add(new Turn(Role.User, TestsRequiredFeedback));
                 continue;
             }
@@ -140,6 +165,7 @@ public sealed class AgentLoop
             {
                 // ⑤ 판정 — 런타임 기준이 없거나 타깃이 런타임 검증을 지원하지 않으면 여기까지가 성공 기준.
                 var why = assertCode is null ? "no runtime criterion" : "target has no runtime verification";
+                Begin(SpanKind.Node, "VerifyRuntime")?.Skip(why).Dispose();
                 return new LoopResult(true, step, $"applied and verified in {step} step(s) ({why})");
             }
 
@@ -148,6 +174,7 @@ public sealed class AgentLoop
             var source = useTests ? "test files" : (_options.Assert is not null ? "user-supplied" : "AI-written");
             _log($"③ verify   → running {runtimeLabel} ({source})");
 
+            var runtimeSpan = Begin(SpanKind.Node, useTests ? "VerifyTests" : "VerifyAssert");
             var play = await _target.VerifyAsync(
                 new VerifySpec(runtimeKind, useTests ? null : assertCode), ct);
 
@@ -157,7 +184,8 @@ public sealed class AgentLoop
                 foreach (var e in play.Errors.Take(3))
                     _log($"      · {Feedback.Clip(e, 200)}");
 
-                WriteRunLog(step, "runtime", string.Join("\n", play.Errors) + "\n\n---\n" + play.Log);
+                runtimeSpan?.Artifact("runtime.log", string.Join("\n", play.Errors) + "\n\n---\n" + play.Log)
+                            .Fail(play.Errors, play.Log).Dispose();
 
                 // ④ 피드백 → 다음 스텝 ①로
                 history.Add(new Turn(Role.User,
@@ -165,6 +193,7 @@ public sealed class AgentLoop
                 continue;
             }
             _log($"③ verify   → {runtimeLabel} passed ✅  {play.Log}");
+            runtimeSpan?.Pass(string.IsNullOrWhiteSpace(play.Log) ? source : $"{source} · {play.Log}").Dispose();
 
             // ③-c 검증: 성능 예산 (프로파일링) — "동작 정상 ≠ 충분히 빠름"
             // PERF 블록은 eval 로 측정하므로 tests-only 모드에서는 건너뛴다
@@ -173,17 +202,20 @@ public sealed class AgentLoop
             if (perfSpec is null || !_target.Supports(VerifyKind.Performance))
             {
                 // ⑤ 판정
+                Begin(SpanKind.Node, "VerifyPerf")?.Skip(perfSpec is null ? "no PERF block" : "unsupported").Dispose();
                 await CaptureEvidenceAsync(goal, ct);
                 return new LoopResult(true, step, $"applied and runtime-verified in {step} step(s)");
             }
 
             var perfLabel = _target.LabelFor(VerifyKind.Performance);
+            var perfSpan = Begin(SpanKind.Node, "VerifyPerf");
             var perf = await _target.VerifyAsync(new VerifySpec(VerifyKind.Performance, perfSpec), ct);
 
             // ⑤ 판정
             if (perf.Ok)
             {
                 _log($"③ verify   → {perfLabel} passed ✅  {perf.Log}");
+                perfSpan?.Pass(perf.Log).Dispose();
                 await CaptureEvidenceAsync(goal, ct);
                 return new LoopResult(true, step, $"behavior AND performance verified in {step} step(s)");
             }
@@ -191,6 +223,7 @@ public sealed class AgentLoop
             _log($"③ verify   → {perfLabel} exceeded ❌  {perf.Log}");
             foreach (var e in perf.Errors.Take(3))
                 _log($"      · {e}");
+            perfSpan?.Fail(perf.Errors, perf.Log).Dispose();
 
             // ④ 피드백 → 다음 스텝 ①로
             history.Add(new Turn(Role.User, BuildPerfFeedback(perf.Errors)));
@@ -287,21 +320,6 @@ public sealed class AgentLoop
         var kept = new List<Turn> { history[0] };            // 목표
         kept.AddRange(history.Skip(history.Count - window));  // 최근 N턴
         return kept;
-    }
-
-    /// <summary>전체 원문을 파일로 남긴다(모델에는 요약만 간다 — 사람이 볼 몫).</summary>
-    private void WriteRunLog(int step, string title, string body)
-    {
-        if (_options.RunLogDir is null)
-            return;
-
-        try
-        {
-            Directory.CreateDirectory(_options.RunLogDir);
-            var path = Path.Combine(_options.RunLogDir, $"step{step:D2}-{title}.log");
-            File.WriteAllText(path, body);
-        }
-        catch { /* 로그 실패가 루프를 막지는 않는다 */ }
     }
 
     // 성공 시 결과 화면을 남긴다(옵션). 판정에는 영향을 주지 않는 **증거 수집**이다.
