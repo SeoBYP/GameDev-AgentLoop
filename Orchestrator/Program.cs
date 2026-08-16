@@ -88,14 +88,17 @@ if (opts.ListSkills)
 // 1-b2) 벤치마크 목표는 **일찍** 읽는다 — 깨진 목표 파일을 에디터 연결 확인 뒤에 알려 줄 이유가 없고,
 //       90분짜리 실행이 시작 직후 죽는 것도 막는다.
 IReadOnlyList<BenchGoal>? benchGoals = null;
+string? benchGoalsPath = null;
 if (opts.Bench)
 {
-    var goalsPath = opts.BenchGoals ?? Path.Combine(projectPath, "Benchmark", "goals.jsonl");
-    if (!File.Exists(goalsPath))
+    var goalsPath = opts.BenchGoals ?? ResolveBenchGoals(projectPath);
+    benchGoalsPath = goalsPath;
+    if (goalsPath is null || !File.Exists(goalsPath))
     {
-        Console.Error.WriteLine($"No benchmark goals at {goalsPath}. Use --bench-goals <path>.");
+        Console.Error.WriteLine("No benchmark goals found. Use --bench-goals <path>.");
         return 2;
     }
+    Console.WriteLine($"Benchmark goals: {goalsPath}");
 
     benchGoals = BenchGoal.Load(goalsPath)
         .Where(g => opts.BenchSet is null or "all" || g.Set.Equals(opts.BenchSet, StringComparison.OrdinalIgnoreCase))
@@ -239,7 +242,9 @@ if (opts.Bench)
 {
     var benchId = startedAt.ToString("yyyyMMdd-HHmmss");
     var benchRuns = Path.Combine(projectPath, ".agentloop", "bench", benchId);
-    var benchOut = opts.BenchOut ?? Path.Combine(projectPath, "Benchmark", "results", benchId);
+    // 요약(숫자)은 **목표 파일 옆**에 쌓는다 — 대상은 빈 샌드박스라 거기 두면 비교 이력이 흩어진다.
+    var benchOut = opts.BenchOut
+        ?? Path.Combine(Path.GetDirectoryName(benchGoalsPath!)!, "results", benchId);
 
     var runner = new BenchRunner(backend, target, layout, projectPath, selectedSkills, loopOptions);
     var summary = await runner.RunAsync(benchGoals!, benchId, benchRuns, opts.Model, cts.Token);
@@ -397,6 +402,34 @@ static RunManifest NotStarted(
         Steps: 0,
         Summary: reason,
         WallClockMs: 0);
+
+// 벤치 목표 해석 — 스킬과 같은 규칙이다. 목표 세트는 **대상 프로젝트가 아니라 도구에** 딸려 있다.
+// (벤치는 빈 샌드박스 프로젝트를 대상으로 도는 게 정상이라, 대상 기준으로 찾으면 절대 못 찾는다.)
+static string? ResolveBenchGoals(string projectPath)
+{
+    var projectLocal = Path.Combine(projectPath, "Benchmark", "goals.jsonl");
+    if (File.Exists(projectLocal))
+        return projectLocal;
+
+    var dir = new DirectoryInfo(AppContext.BaseDirectory);
+    while (dir is not null)
+    {
+        var candidate = Path.Combine(dir.FullName, "Benchmark", "goals.jsonl");
+        // 빌드 출력본(bin/obj)은 건너뛴다 — 개발 중에 그걸 잡으면 결과 요약이
+        // 추적되지 않는 bin/ 안에 쌓여 비교 이력이 사라진다. 설치본 경로엔 bin/obj 가 없다.
+        if (File.Exists(candidate) && !IsBuildOutput(candidate))
+            return candidate;
+        dir = dir.Parent;
+    }
+    return null;
+
+    static bool IsBuildOutput(string path)
+    {
+        var p = path.Replace('\\', '/');
+        return p.Contains("/bin/", StringComparison.OrdinalIgnoreCase)
+            || p.Contains("/obj/", StringComparison.OrdinalIgnoreCase);
+    }
+}
 
 // 스킬 디렉터리 해석 — 대상 프로젝트의 Skills/ 가 있으면 우선, 없으면 오케스트레이터와 함께 배포된 것.
 // (dev: bin/Debug/netX/ 에서 위로 올라가며 찾는다. 설치본: 실행 파일 옆.)

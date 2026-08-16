@@ -9,6 +9,9 @@
 # 벤치마크 샌드박스 = 별도 Unity 프로젝트.
 # 뼈대(ProjectSettings/manifest/asmdef)는 추적해 누구나 같은 환경을 재현하게 하고,
 # Unity 가 만들어 내는 것과 생성물은 무시한다.
+Benchmark/Sandbox/.agentloop/*
+!Benchmark/Sandbox/.agentloop/layout.json
+Benchmark/Sandbox/Benchmark/
 Benchmark/Sandbox/[Ll]ibrary/
 Benchmark/Sandbox/[Tt]emp/
 Benchmark/Sandbox/[Ll]ogs/
