@@ -410,6 +410,13 @@ Assets/Scripts/AgentLoop.Runtime.asmdef
 `InputTestFixture` 를 상속하면 `Press`/`Release`/`PressAndRelease`/`Set`/`SetTouch` 를 쓸 수 있고,
 장치는 `InputSystem.AddDevice<Keyboard>()` 등으로 만든다. 생성 지침에 이 패턴을 예시로 넣었다.
 
+**장치 4종 모두 실측**했다(키보드·마우스·게임패드·터치, `InputSmokeTest` 13/13). 지침에 적어만 두고
+안 재 본 예시는 결국 틀린다 — 터치가 그랬다: `TouchPhase` 는 `UnityEngine`(구 Input)과
+`UnityEngine.InputSystem` 양쪽에 있어 **정규화하지 않으면 CS0104 모호 참조**로 깨진다.
+다른 세 장치에는 없던 함정이라, 실제로 짜 보기 전엔 드러나지 않았다.
+공통 규칙은 하나다 — **입력은 큐잉되므로 `yield return null` 로 프레임을 넘겨야 반영된다**
+(안 넘기고 읽으면 `Began` 대신 `None`이 나오는 것까지 확인).
+
 **실측**: "스페이스바로 점프하고 0.5초 뒤 자동 착지" 목표 →
 모델이 `JumperTests : InputTestFixture` 를 만들어 `AddDevice<Keyboard>()` → `Press(spaceKey)` →
 프레임 진행 → 상태 확인. **step 1 에서 자동 착지 버그를 잡아(9/10) step 2 에 10/10 통과.**

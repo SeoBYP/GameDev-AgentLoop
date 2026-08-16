@@ -394,5 +394,33 @@ AI 가 만든 코드가 전부 git 에 남는 리뷰 가능한 파일이 된다.
 - eval 결과 원문(JSON)이 로그에 그대로 찍히던 것 정리(전문은 실행 로그 파일로).
 
 ### 남은 것 / 다음
-- 터치 입력 시나리오(`SetTouch`)는 지침에만 있고 미실측.
 - 빌드 성능과 에디터 측정치의 차이 보정(현재는 상대 비교용).
+
+---
+
+## 2026-08 · 터치 입력 실측
+
+지침에만 적어 두고 안 재 본 마지막 장치. **적어 둔 예시가 실제로 컴파일되고 통과하는지**를 확인했다.
+
+`SetTouch` 는 시그니처부터 패키지 소스에서 확인했다(추측 금지):
+
+```
+InputTestFixture.SetTouch(int touchId, TouchPhase phase, Vector2 position, Vector2 delta = default,
+    bool queueEventOnly = true, Touchscreen screen = null, double time = -1, double timeOffset = 0)
+```
+
+`InputSmokeTest.VirtualTouch_BeganAndEnded_AreSeen` 추가 — `Touchscreen` 을 붙이고
+Began → 좌표·페이즈 확인 → Ended 확인. **스모크 13/13 통과.**
+
+### 발견 / 고친 것
+- **`TouchPhase` 는 정규화가 필수.** `UnityEngine`(구 Input)과 `UnityEngine.InputSystem` 양쪽에
+  같은 이름이 있어, 테스트가 두 네임스페이스를 다 `using` 하면 그냥 `TouchPhase` 는 **CS0104 모호 참조**다.
+  키보드·마우스·패드에는 없던 함정이라 터치를 실제로 짜 보기 전엔 안 드러났다.
+  → 생성 지침의 터치 예시를 `UnityEngine.InputSystem.TouchPhase.Began` 정규화 형태로 고쳤다.
+- **내가 처음 단 주석이 틀렸다.** `queueEventOnly` 기본값이 `true` 라 "즉시 반영하려면 `false` 로 줘야 한다"고
+  적었는데, **뒤집어서 재 보니 기본값으로도 통과했다.** 진짜 요건은 `yield return null`(프레임 넘기기)였다.
+  - 부정 실험으로 확정: 프레임을 안 넘기고 읽으면 `Expected: Began / But was: None` 으로 **실패**한다.
+    통과가 헛통과가 아님(falsifiable)까지 같이 확인된다.
+  - 교훈은 이 프로젝트가 계속 배운 것과 같다 — **"그럴듯한 설명"은 근거가 아니다.**
+    문서에 쓸 인과는 한 번 뒤집어 봐야 안다.
+- 생성 지침의 "항상 `yield return null`" 문구에 *왜*(입력은 큐잉된다)를 덧붙였다. 규칙만 주면 모델이 생략한다.

@@ -56,4 +56,28 @@ public class InputSmokeTest : InputTestFixture
         Release(pad.buttonSouth);
         yield return null;
     }
+
+    // TouchPhase 는 UnityEngine(구 Input) 과 UnityEngine.InputSystem 양쪽에 있어 **정규화가 필수**다
+    // (그냥 TouchPhase 라고 쓰면 CS0104 모호 참조).
+    // 그리고 SetTouch 는 이벤트를 큐에 넣기만 하므로 `yield return null` 로 한 프레임 넘겨야 반영된다.
+    //   실측: 프레임을 안 넘기고 읽으면 Expected: Began / But was: None 으로 실패.
+    [UnityTest]
+    public IEnumerator VirtualTouch_BeganAndEnded_AreSeen()
+    {
+        var screen = InputSystem.AddDevice<Touchscreen>();
+
+        SetTouch(0, UnityEngine.InputSystem.TouchPhase.Began, new Vector2(120f, 240f));
+        yield return null;
+
+        Assert.AreEqual(UnityEngine.InputSystem.TouchPhase.Began, screen.primaryTouch.phase.ReadValue(),
+            "터치 시작이 반영되지 않았습니다.");
+        Assert.AreEqual(120f, screen.primaryTouch.position.x.ReadValue(), 0.5f,
+            "터치 좌표가 반영되지 않았습니다.");
+
+        SetTouch(0, UnityEngine.InputSystem.TouchPhase.Ended, new Vector2(120f, 240f));
+        yield return null;
+
+        Assert.AreEqual(UnityEngine.InputSystem.TouchPhase.Ended, screen.primaryTouch.phase.ReadValue(),
+            "터치 종료가 반영되지 않았습니다.");
+    }
 }

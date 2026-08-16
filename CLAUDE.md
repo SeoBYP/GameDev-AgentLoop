@@ -99,7 +99,9 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
   `--demo-draw`: 시간 0.01ms 통과하나 drawCalls +257 로 초과 → +64 로 통과.
   - **메모리는 예산에서 제외**(실측): monoUsedBytes 는 GC 요동으로 감소하기도 해 판정 불가 → 진단 기록만.
   - 캘리브레이션 필수: 큐브 1개 ≈ drawCall 4개(조명·패스). 오브젝트 수로 추정하면 틀린다.
-- **마우스·게임패드 입력 실측 완료** — `Set(mouse.position)`/`Press(leftButton)`, `Set(pad.leftStick)`/`Press(buttonSouth)`. 스모크 12/12.
+- **입력 장치 4종 전부 실측 완료** — 키보드·마우스(`Set(position)`/`Press(leftButton)`)·게임패드(`Set(leftStick)`/`Press(buttonSouth)`)·터치. 스모크 **13/13**.
+  - 터치 함정: `TouchPhase` 는 `UnityEngine`·`UnityEngine.InputSystem` 양쪽에 있어 **정규화 필수**(아니면 CS0104). 다른 장치엔 없던 함정.
+  - 공통: 입력은 **큐잉**되므로 `yield return null` 필수. (`queueEventOnly:false` 때문이라 적었다가 뒤집어 재 보니 틀림 — 프레임 넘기기가 진짜 요건.)
 - 데모 5종: `--demo` `--demo-play` `--demo-skills` `--demo-perf` `--demo-draw`
-- 다음: 터치 입력(`SetTouch`) 실측, 빌드 성능과 에디터 측정치 차이 보정.
+- 다음: 빌드 성능과 에디터 측정치 차이 보정.
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

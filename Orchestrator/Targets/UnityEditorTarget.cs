@@ -111,8 +111,13 @@ public sealed class UnityEditorTarget : IExecTarget
                              `Set(m.position, new Vector2(640f, 360f));` then `Press(m.leftButton)`
                 * Gamepad  — `var pad = InputSystem.AddDevice<Gamepad>();`
                              `Set(pad.leftStick, new Vector2(1f, 0f));` / `Press(pad.buttonSouth)`
-                * Touch    — `SetTouch(0, TouchPhase.Began, new Vector2(x, y));`
-              Always `yield return null;` after injecting input so it is processed.
+                * Touch    — `var ts = InputSystem.AddDevice<Touchscreen>();`
+                             `SetTouch(0, UnityEngine.InputSystem.TouchPhase.Began, new Vector2(x, y));`
+                             then read `ts.primaryTouch.phase` / `ts.primaryTouch.position`.
+                             `TouchPhase` MUST be fully qualified — the name also exists in
+                             `UnityEngine` (legacy Input), so a bare `TouchPhase` is CS0104 ambiguous.
+              Always `yield return null;` after injecting input so it is processed —
+              input events are queued, and reading before the frame advances returns the old value.
             * Do NOT emit an ASSERT block when you write tests.
 
         - If (and only if) you do NOT write tests, emit EXACTLY ONE runtime check as:
