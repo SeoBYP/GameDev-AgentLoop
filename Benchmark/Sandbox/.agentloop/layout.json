@@ -1,0 +1,6 @@
+{
+    "scriptDir": "Assets/Scripts",
+    "testDir": "Assets/Tests/PlayMode",
+    "runtimeAssembly": "Game.Runtime",
+    "testAssembly": "Game.Tests"
+}

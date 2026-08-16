@@ -42,11 +42,32 @@ span traces to `.agentloop/bench/<benchId>/` (ignored — working data).
 
 A baseline must be recorded **before** the loop changes, otherwise later comparison is meaningless.
 
-## Running it
+## Run it against the sandbox, not your project
 
-The goals need a live Unity Editor and a real backend, and each one takes minutes — a full sweep is
-roughly an hour and a half. Between goals the runner deletes the files that goal generated (never
-pre-existing ones) and recompiles, so each goal starts from a clean project.
+`Sandbox/` is a separate, empty Unity project that exists only for benchmarking. **Do not run the
+benchmark against a project that already has code in it.**
+
+The reason is contamination, and it is not hypothetical. In this repo, 8 of the 18 goals collide by
+name with existing components, and two of them (`MoveToTarget`, `Jumper`) are referenced by existing
+tests. The Test Runner runs the *whole* suite, so a goal that overwrites one of those files breaks
+unrelated tests and gets scored as a failure it did not cause — producing a baseline that is simply wrong.
+
+```bash
+# once: open Benchmark/Sandbox in the Unity Editor and let it import,
+#       then confirm the pipeline server is up
+unity pipeline list
+
+agentloop --claude --bench --project Benchmark/Sandbox
+```
+
+The sandbox tracks only its skeleton — `ProjectSettings/`, `Packages/manifest.json`, and the two
+assembly definitions — so anyone can reproduce the same environment. It deliberately copies this
+project's package versions and `activeInputHandler` setting, because render budgets and virtual
+input depend on both.
+
+Between goals the runner deletes the files that goal generated (never pre-existing ones) and
+recompiles, so each goal starts clean. Each goal takes minutes; a full sweep is roughly an hour
+and a half.
 
 ## Adding a goal
 

@@ -27,18 +27,24 @@ public static class ProjectInit
         var testName = layout.TestAssembly ?? "Game.Tests";
         var created = new List<string>();
 
+        // Input System 이 설치돼 있으면 참조를 넣어 준다. 없으면 가상 입력으로 조작 시나리오를
+        // 검증할 수 없고, 그건 "테스트가 안 됨"이 아니라 "인프라가 없음"이라 조용히 실패한다.
+        var hasInput = HasPackage(projectRoot, "com.unity.inputsystem");
+        if (hasInput)
+            Console.WriteLine("  · Input System detected — adding references for virtual input tests");
+
         // 런타임 asmdef — 이미 있으면(탐지됨) 건드리지 않는다.
         if (layout.RuntimeAssembly is null)
         {
             var dir = Path.Combine(projectRoot, layout.ScriptDir.Replace('/', Path.DirectorySeparatorChar));
-            if (TryWrite(Path.Combine(dir, runtimeName + ".asmdef"), RuntimeAsmdef(runtimeName), out var p))
+            if (TryWrite(Path.Combine(dir, runtimeName + ".asmdef"), RuntimeAsmdef(runtimeName, hasInput), out var p))
                 created.Add(p);
         }
 
         // 테스트 asmdef — 런타임을 참조하고, 테스트 러너/NUnit 을 끌어온다.
         {
             var dir = Path.Combine(projectRoot, layout.TestDir.Replace('/', Path.DirectorySeparatorChar));
-            if (TryWrite(Path.Combine(dir, testName + ".asmdef"), TestAsmdef(testName, runtimeName), out var p))
+            if (TryWrite(Path.Combine(dir, testName + ".asmdef"), TestAsmdef(testName, runtimeName, hasInput), out var p))
                 created.Add(p);
         }
 
@@ -82,11 +88,23 @@ public static class ProjectInit
         return true;
     }
 
-    private static string RuntimeAsmdef(string name) => $$"""
+    /// <summary>manifest.json 에 해당 패키지가 있는가(간단 문자열 검사로 충분하다).</summary>
+    private static bool HasPackage(string projectRoot, string package)
+    {
+        try
+        {
+            var manifest = Path.Combine(projectRoot, "Packages", "manifest.json");
+            return File.Exists(manifest) &&
+                   File.ReadAllText(manifest).Contains(package, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    private static string RuntimeAsmdef(string name, bool hasInput) => $$"""
         {
             "name": "{{name}}",
             "rootNamespace": "",
-            "references": [],
+            "references": [{{(hasInput ? "\n        \"Unity.InputSystem\"\n    " : "")}}],
             "includePlatforms": [],
             "excludePlatforms": [],
             "allowUnsafeCode": false,
@@ -103,14 +121,14 @@ public static class ProjectInit
     //   references: 런타임 + 테스트 러너(에디터/런타임 양쪽)
     //   precompiledReferences: nunit.framework.dll
     //   defineConstraints: UNITY_INCLUDE_TESTS  (빌드에 딸려 나가지 않게)
-    private static string TestAsmdef(string name, string runtime) => $$"""
+    private static string TestAsmdef(string name, string runtime, bool hasInput) => $$"""
         {
             "name": "{{name}}",
             "rootNamespace": "",
             "references": [
                 "{{runtime}}",
                 "UnityEngine.TestRunner",
-                "UnityEditor.TestRunner"
+                "UnityEditor.TestRunner"{{(hasInput ? ",\n        \"Unity.InputSystem\",\n        \"Unity.InputSystem.TestFramework\"" : "")}}
             ],
             "includePlatforms": [],
             "excludePlatforms": [],
