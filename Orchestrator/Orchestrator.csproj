@@ -16,4 +16,34 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <!--
+    `dotnet tool` 로 배포한다 — .NET 콘솔 앱을 남이 쓰게 하는 가장 마찰 없는 경로다.
+      dotnet tool install -g GameDev.AgentLoop
+      agentloop "목표 문장" (프로젝트는 자동 탐지 또는 옵션으로 지정)
+  -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>agentloop</ToolCommandName>
+    <PackageId>GameDev.AgentLoop</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>SeoBYP</Authors>
+    <Description>A closed loop that makes CLI AI agents generate Unity code, then actually runs, verifies, and repairs it — compile, PlayMode tests, input simulation, and performance budgets.</Description>
+    <PackageTags>unity;ai;agent;codegen;testing;claude;codex;llm</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/SeoBYP/GameDev-AgentLoop</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SeoBYP/GameDev-AgentLoop</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <!--
+    스킬은 **오케스트레이터와 함께** 배포된다. 대상 Unity 프로젝트에 있는 게 아니라서,
+    실행 파일 옆에 실려 있어야 설치본에서도 도메인 규칙이 적용된다(Program.ResolveSkillsDir).
+  -->
+  <ItemGroup>
+    <!-- 출력 폴더에 두면 tool 패키징이 알아서 tools/ 아래로 담는다(PackagePath 를 겹쳐 주면 NU5118). -->
+    <Content Include="../Skills/**/*.md" Link="Skills/%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
 </Project>

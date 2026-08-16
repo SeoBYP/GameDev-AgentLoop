@@ -34,8 +34,16 @@ var loadedKeys = DotEnv.Load(envFile);
 if (loadedKeys.Count > 0)
     Console.WriteLine($".env 적용: {string.Join(", ", loadedKeys)}");   // 키 이름만 — 값은 절대 출력하지 않는다
 
+// 1-a2) 대상 프로젝트의 배치 해석 — 경로·어셈블리는 프로젝트마다 다르다.
+var layout = ProjectLayout.Resolve(projectPath);
+
+if (opts.Init)
+    return ProjectInit.Run(projectPath, layout);
+
 // 1-b) 도메인 스킬 로드 (Phase 3) — 포터블 마크다운이라 모든 백엔드에 동일하게 적용된다.
-var skillsDir = opts.SkillsDir ?? Path.Combine(projectPath, "Skills");
+//      스킬은 **오케스트레이터와 함께 배포**된다. 대상 프로젝트의 Skills/ 는 있으면 우선한다
+//      (남의 Unity 프로젝트를 가리켰을 때 조용히 0개가 되는 걸 막는다).
+var skillsDir = opts.SkillsDir ?? ResolveSkillsDir(projectPath);
 var library = opts.SkillsOff ? SkillLibrary.Empty : SkillLibrary.Load(skillsDir);
 var selectedSkills = library.Select(opts.Goal, opts.Target);
 
@@ -70,9 +78,14 @@ if (opts.Target.Equals("ugs", StringComparison.OrdinalIgnoreCase))
 else
 {
     var unityExe = UnityEditorTarget.ResolveUnityExe();
+    Console.WriteLine($"프로젝트 배치: {layout.Describe()}");
+    if (!layout.TestsReady)
+        Console.WriteLine("  ⚠ 테스트 어셈블리가 없어 테스트 검증을 건너뜁니다 — `--init` 으로 만들 수 있습니다.");
+
     target = new UnityEditorTarget(
         unityExe, projectPath,
         label: $"unity:{ReadEditorVersion(projectPath)}",
+        layout: layout,
         allowUnsafeEval: opts.AllowUnsafeEval);
 }
 
@@ -214,6 +227,7 @@ static Options ParseArgs(string[] args)
             case "--skills" when i + 1 < args.Length: o.SkillsOff = args[++i].Equals("off", StringComparison.OrdinalIgnoreCase); break;
             case "--skills-dir" when i + 1 < args.Length: o.SkillsDir = args[++i]; break;
             case "--list-skills": o.ListSkills = true; break;
+            case "--init": o.Init = true; break;
             case "--print-prompt": o.PrintPrompt = true; break;
             case "--env-file" when i + 1 < args.Length: o.EnvFile = args[++i]; break;
             case "--target" when i + 1 < args.Length: o.Target = args[++i]; break;
@@ -244,6 +258,33 @@ static Options ParseArgs(string[] args)
             o.Goal = "격자 타일을 스폰하는 TileField 컴포넌트를 만들어줘. Build() 로 바닥 타일을 깐다.";
     }
     return o;
+}
+
+// 스킬 디렉터리 해석 — 대상 프로젝트의 Skills/ 가 있으면 우선, 없으면 오케스트레이터와 함께 배포된 것.
+// (dev: bin/Debug/netX/ 에서 위로 올라가며 찾는다. 설치본: 실행 파일 옆.)
+static string ResolveSkillsDir(string projectPath)
+{
+    var projectLocal = Path.Combine(projectPath, "Skills");
+    if (HasSkillFiles(projectLocal))
+        return projectLocal;
+
+    var dir = new DirectoryInfo(AppContext.BaseDirectory);
+    while (dir is not null)
+    {
+        var candidate = Path.Combine(dir.FullName, "Skills");
+        if (HasSkillFiles(candidate))
+            return candidate;
+        dir = dir.Parent;
+    }
+    return projectLocal;   // 없으면 원래 자리를 가리켜 둔다(빈 라이브러리로 로드됨)
+
+    // 이름만으로는 부족하다 — `Orchestrator/Skills/` 는 같은 이름의 **C# 소스** 폴더라 먼저 걸린다.
+    // 실제 스킬은 마크다운이므로 .md 가 있는지까지 봐야 한다.
+    static bool HasSkillFiles(string path)
+    {
+        try { return Directory.Exists(path) && Directory.EnumerateFiles(path, "*.md").Any(); }
+        catch { return false; }
+    }
 }
 
 // cwd 에서 위로 올라가며 Assets/ + ProjectSettings/ 가 있는 폴더(Unity 루트)를 찾는다.
@@ -304,6 +345,7 @@ sealed class Options
     public string? Assert { get; set; }
     public bool SkillsOff { get; set; }
     public bool ListSkills { get; set; }
+    public bool Init { get; set; }
     public bool PrintPrompt { get; set; }
     public string? EnvFile { get; set; }
     public string? SkillsDir { get; set; }

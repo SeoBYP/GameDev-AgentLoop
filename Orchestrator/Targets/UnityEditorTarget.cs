@@ -28,11 +28,18 @@ public sealed class UnityEditorTarget : IExecTarget
     private readonly int _timeoutSec;
     private readonly string _label;
     private readonly bool _allowUnsafeEval;   // 가드 우회(명시적 opt-in)
+    private readonly ProjectLayout _layout;   // 대상 프로젝트의 배치(경로·어셈블리)
 
     public string Name => _label;
 
-    public bool Supports(VerifyKind kind) =>
-        kind is VerifyKind.Compile or VerifyKind.RuntimeAssert or VerifyKind.Performance or VerifyKind.Tests;
+    // 테스트 asmdef 이 없는 프로젝트에서는 테스트 검증이 **원리적으로 불가능**하다
+    // (Unity 테스트 asmdef 은 Assembly-CSharp 을 참조할 수 없다). 못 하는 걸 된다고 하지 않는다.
+    public bool Supports(VerifyKind kind) => kind switch
+    {
+        VerifyKind.Tests => _layout.TestsReady,
+        VerifyKind.Compile or VerifyKind.RuntimeAssert or VerifyKind.Performance => true,
+        _ => false,
+    };
 
     public string LabelFor(VerifyKind kind) => kind switch
     {
@@ -47,78 +54,23 @@ public sealed class UnityEditorTarget : IExecTarget
         "Unity pipeline 서버에 연결할 수 없습니다.\n" +
         "  → 대상 프로젝트를 Unity 에디터에서 열고, `unity pipeline list` 의 '서버 연결 가능' 이 true 인지 확인하세요.";
 
-    /// <summary>Unity 에디터 타깃의 생성 규격 — C# 스크립트 + 플레이모드 assert 스니펫.</summary>
-    public string GenerationBrief => """
+    /// <summary>
+    /// Unity 에디터 타깃의 생성 규격 — C# 스크립트 + 플레이모드 assert 스니펫.
+    /// 경로·어셈블리는 **대상 프로젝트마다 다르므로** <see cref="ProjectLayout"/> 에서 채운다.
+    /// 여기에 하드코딩하면 이 레포에서만 도는 도구가 된다.
+    /// </summary>
+    public string GenerationBrief => BriefTemplate
+        // 섹션을 먼저 끼운다 — 삽입되는 텍스트 안에도 자리표시자가 들어 있다.
+        .Replace("%TEST_SECTION%", _layout.TestsReady ? TestSection : NoTestSection)
+        .Replace("%SCRIPT_DIR%", _layout.ScriptDir)
+        .Replace("%TEST_DIR%", _layout.TestDir)
+        .Replace("%TEST_ASSEMBLY%", _layout.TestAssembly ?? "-")
+        .Replace("%RUNTIME_ASSEMBLY%", _layout.RuntimeAssembly ?? "Assembly-CSharp");
+
+    private const string BriefTemplate = """
         TARGET: Unity 6 (6000.x) Editor, C#. Assume UnityEngine is available.
-        - Put runtime scripts under Assets/Scripts/ (assembly `AgentLoop.Runtime`).
-
-        - PREFER writing a PlayMode test over the ASSERT block below. Tests persist in the repo
-          and guard against regressions, and they can span multiple frames. Emit it as a FILE:
-        FILE: Assets/Tests/PlayMode/<TypeName>Tests.cs
-        ```csharp
-        using System.Collections;
-        using NUnit.Framework;
-        using UnityEngine;
-        using UnityEngine.TestTools;
-
-        public class <TypeName>Tests
-        {
-            [Test]
-            public void Clamps_At_Zero() { /* build the component, act, Assert.AreEqual(...) */ }
-
-            [UnityTest]
-            public IEnumerator Reaches_Target_Over_Frames()
-            {
-                // yield return null; advances one frame — use this for multi-frame scenarios
-                yield return null;
-            }
-        }
-        ```
-          Rules for tests:
-            * The test assembly `AgentLoop.Tests` already exists and references `AgentLoop.Runtime`.
-              Just add the .cs file under Assets/Tests/PlayMode/ — do NOT create an .asmdef.
-            * Create objects with `new GameObject()` + `AddComponent<T>()`; clean up with
-              `Object.DestroyImmediate(go)` (or `Object.Destroy` inside `[UnityTest]`).
-            * Cover the edge cases the goal implies (clamping, bounds, invalid input).
-            * Use `[UnityTest]` + `yield return null` when behavior unfolds over frames
-              (movement, cooldowns, timers) — that is the only way to verify it honestly.
-            * **Input-driven behavior**: derive the test class from `InputTestFixture` and inject
-              virtual input instead of faking it with direct method calls:
-
-              public class JumpTests : InputTestFixture
-              {
-                  [UnityTest]
-                  public IEnumerator Space_Triggers_Jump()
-                  {
-                      var keyboard = InputSystem.AddDevice<Keyboard>();
-                      var go = new GameObject();
-                      var jump = go.AddComponent<Jumper>();
-
-                      Press(keyboard.spaceKey);
-                      yield return null;              // let the input be processed
-                      Release(keyboard.spaceKey);
-                      yield return null;
-
-                      Assert.IsTrue(jump.HasJumped);
-                      Object.Destroy(go);
-                  }
-              }
-
-              Devices and helpers (`using UnityEngine.InputSystem;` — already referenced):
-                * Keyboard — `var kb = InputSystem.AddDevice<Keyboard>();`
-                             `Press(kb.spaceKey)` / `Release(...)` / `PressAndRelease(...)`
-                * Mouse    — `var m = InputSystem.AddDevice<Mouse>();`
-                             `Set(m.position, new Vector2(640f, 360f));` then `Press(m.leftButton)`
-                * Gamepad  — `var pad = InputSystem.AddDevice<Gamepad>();`
-                             `Set(pad.leftStick, new Vector2(1f, 0f));` / `Press(pad.buttonSouth)`
-                * Touch    — `var ts = InputSystem.AddDevice<Touchscreen>();`
-                             `SetTouch(0, UnityEngine.InputSystem.TouchPhase.Began, new Vector2(x, y));`
-                             then read `ts.primaryTouch.phase` / `ts.primaryTouch.position`.
-                             `TouchPhase` MUST be fully qualified — the name also exists in
-                             `UnityEngine` (legacy Input), so a bare `TouchPhase` is CS0104 ambiguous.
-              Always `yield return null;` after injecting input so it is processed —
-              input events are queued, and reading before the frame advances returns the old value.
-            * Do NOT emit an ASSERT block when you write tests.
+        - Put runtime scripts under %SCRIPT_DIR%/ (assembly `%RUNTIME_ASSEMBLY%`).
+        %TEST_SECTION%
 
         - If (and only if) you do NOT write tests, emit EXACTLY ONE runtime check as:
         ASSERT:
@@ -163,16 +115,95 @@ public sealed class UnityEditorTarget : IExecTarget
               (bullets, particles, tiles) — fast code that floods draw calls still fails a game.
         """;
 
+    // 테스트 어셈블리가 없는 프로젝트 — 테스트를 쓰라고 하면 반드시 실패한다. 아예 요구하지 않는다.
+    private const string NoTestSection = """
+        - This project has no test assembly, so PlayMode tests cannot be compiled here.
+          Verify with the ASSERT block below instead.
+          (Run `agentloop --init` once to create the assembly definitions and enable tests.)
+        """;
+
+    private const string TestSection = """
+        - PREFER writing a PlayMode test over the ASSERT block below. Tests persist in the repo
+          and guard against regressions, and they can span multiple frames. Emit it as a FILE:
+        FILE: %TEST_DIR%/<TypeName>Tests.cs
+        ```csharp
+        using System.Collections;
+        using NUnit.Framework;
+        using UnityEngine;
+        using UnityEngine.TestTools;
+
+        public class <TypeName>Tests
+        {
+            [Test]
+            public void Clamps_At_Zero() { /* build the component, act, Assert.AreEqual(...) */ }
+
+            [UnityTest]
+            public IEnumerator Reaches_Target_Over_Frames()
+            {
+                // yield return null; advances one frame — use this for multi-frame scenarios
+                yield return null;
+            }
+        }
+        ```
+          Rules for tests:
+            * The test assembly `%TEST_ASSEMBLY%` already exists and references `%RUNTIME_ASSEMBLY%`.
+              Just add the .cs file under %TEST_DIR%/ — do NOT create an .asmdef.
+            * Create objects with `new GameObject()` + `AddComponent<T>()`; clean up with
+              `Object.DestroyImmediate(go)` (or `Object.Destroy` inside `[UnityTest]`).
+            * Cover the edge cases the goal implies (clamping, bounds, invalid input).
+            * Use `[UnityTest]` + `yield return null` when behavior unfolds over frames
+              (movement, cooldowns, timers) — that is the only way to verify it honestly.
+            * **Input-driven behavior**: derive the test class from `InputTestFixture` and inject
+              virtual input instead of faking it with direct method calls:
+
+              public class JumpTests : InputTestFixture
+              {
+                  [UnityTest]
+                  public IEnumerator Space_Triggers_Jump()
+                  {
+                      var keyboard = InputSystem.AddDevice<Keyboard>();
+                      var go = new GameObject();
+                      var jump = go.AddComponent<Jumper>();
+
+                      Press(keyboard.spaceKey);
+                      yield return null;              // let the input be processed
+                      Release(keyboard.spaceKey);
+                      yield return null;
+
+                      Assert.IsTrue(jump.HasJumped);
+                      Object.Destroy(go);
+                  }
+              }
+
+              Devices and helpers (`using UnityEngine.InputSystem;` — already referenced):
+                * Keyboard — `var kb = InputSystem.AddDevice<Keyboard>();`
+                             `Press(kb.spaceKey)` / `Release(...)` / `PressAndRelease(...)`
+                * Mouse    — `var m = InputSystem.AddDevice<Mouse>();`
+                             `Set(m.position, new Vector2(640f, 360f));` then `Press(m.leftButton)`
+                * Gamepad  — `var pad = InputSystem.AddDevice<Gamepad>();`
+                             `Set(pad.leftStick, new Vector2(1f, 0f));` / `Press(pad.buttonSouth)`
+                * Touch    — `var ts = InputSystem.AddDevice<Touchscreen>();`
+                             `SetTouch(0, UnityEngine.InputSystem.TouchPhase.Began, new Vector2(x, y));`
+                             then read `ts.primaryTouch.phase` / `ts.primaryTouch.position`.
+                             `TouchPhase` MUST be fully qualified — the name also exists in
+                             `UnityEngine` (legacy Input), so a bare `TouchPhase` is CS0104 ambiguous.
+              Always `yield return null;` after injecting input so it is processed —
+              input events are queued, and reading before the frame advances returns the old value.
+            * Do NOT emit an ASSERT block when you write tests.
+        """;
+
     public UnityEditorTarget(
         string unityExe,
         string projectPath,
         string label,
+        ProjectLayout layout,
         bool allowUnsafeEval = false,
         int timeoutSec = 120)
     {
         _unityExe = unityExe;
         _projectPath = projectPath;
         _label = label;
+        _layout = layout;
         _allowUnsafeEval = allowUnsafeEval;
         _timeoutSec = timeoutSec;
     }

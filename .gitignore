@@ -1,6 +1,11 @@
 # Unity + .NET(orchestrator) .gitignore
 # based on github/gitignore Unity.gitignore
 
+# --- AgentLoop ---
+# 실행 기록·트레이스(로컬 작업 데이터). layout.json 은 팀 공유가 되도록 추적한다.
+.agentloop/*
+!.agentloop/layout.json
+
 # --- Unity generated ---
 /[Ll]ibrary/
 /[Tt]emp/
