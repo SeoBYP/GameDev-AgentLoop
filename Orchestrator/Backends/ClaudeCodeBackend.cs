@@ -48,7 +48,7 @@ public sealed class ClaudeCodeBackend : IAgentBackend
         var res = await ProcessRunner.RunAsync(file, args, _workDir, ct, stdin: prompt);
         if (!res.Ok)
             throw new InvalidOperationException(
-                $"`claude -p` 실패(exit {res.ExitCode}). 로그인 만료면 `claude` 를 실행해 재로그인하세요.\n{res.StdErr}{res.StdOut}");
+                $"`claude -p` failed (exit {res.ExitCode}). If your login expired, run `claude` and sign in again.\n{res.StdErr}{res.StdOut}");
 
         var text = res.StdOut;
         return new AgentReply(text, EditParser.Parse(text));

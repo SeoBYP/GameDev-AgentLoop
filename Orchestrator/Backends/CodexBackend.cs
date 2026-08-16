@@ -69,7 +69,7 @@ public sealed class CodexBackend : IAgentBackend
 
         if (!res.Ok && string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException(
-                $"`codex exec` 실패(exit {res.ExitCode}). 로그인 필요면 `codex login`.\n{res.StdErr}{res.StdOut}");
+                $"`codex exec` failed (exit {res.ExitCode}). Run `codex login` if you are not signed in.\n{res.StdErr}{res.StdOut}");
 
         return new AgentReply(text, EditParser.Parse(text));
     }

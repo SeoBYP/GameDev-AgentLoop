@@ -1,175 +1,180 @@
-# 아키텍처 — 검증되는 루프
+# Architecture — a loop that gets verified
 
-> **흐름**을 정의하는 문서다. *왜* 그렇게 정했는지의 결정 근거는 [DESIGN.md](DESIGN.md),
-> 무엇을 하며 무엇에 부딪혔는지는 [WORKLOG.md](WORKLOG.md) 에 있다.
+[한국어](ARCHITECTURE.ko.md)
 
-표기 — **[현재]**: 코드에 있음 · **[계획]**: 아직 없음 · **[미실측]**: 재기 전엔 주장하지 않음.
-이 구분을 흐리지 않는 것이 이 프로젝트의 규율이다.
+> This document defines the **flow**. The *why* behind each choice lives in [DESIGN.md](DESIGN.md)
+> (Korean); what broke along the way is in [WORKLOG.md](WORKLOG.md) (Korean).
 
----
-
-## 0. 관통 원칙
-
-> **틀릴 수 있는 것은 검증하고 되먹인다.**
-
-코드만이 아니다. **테스트**도 틀릴 수 있고(§4.2), **예산**도(§9.1), **계획**도(§2) 틀릴 수 있다.
-**코드가 존재하는 이유**조차 틀릴 수 있다(§8).
-전부 같은 취급을 받는다 — 판정 기준을 세우고, 재고, 실패하면 되돌린다.
-
-한 번의 실행은 네 층으로 내려간다. 그 층들이 **하나의 트레이스 트리**로 묶이고(§6),
-실행들 사이에서 그 기록이 판정 기준과 도메인 지식을 갱신한다(§8).
-
-앞이 없으면 결과를 믿을 수 없고, 뒤가 없으면 어제와 똑같은 실수를 오늘도 한다.
+Notation — **[now]**: in the code · **[planned]**: not built yet · **[unmeasured]**: not claimed
+until measured. Keeping that distinction sharp is the discipline this project runs on.
 
 ---
 
-## 1. 전체 지도
+## 0. The principle that runs through everything
+
+> **Anything that can be wrong gets verified and fed back.**
+
+Not just the code. The **tests** can be wrong (§4.2), the **budgets** can be wrong (§9.1), and the
+**plan** can be wrong (§2). All of them get the same treatment: state a criterion, measure it, and
+route failures back.
+
+A single run descends through four layers. Those layers are stitched together by **one trace tree**
+(§6), and between runs that record updates the criteria and the domain knowledge (§9).
+
+Without the first half you cannot trust the result; without the second half you make the same
+mistake tomorrow that you made today.
+
+---
+
+## 1. The map
 
 ```mermaid
 flowchart TB
-    subgraph RUN["한 번의 실행"]
+    subgraph RUN["A single run"]
         direction TB
-        PL["① 계획 · 목표를 작업 노드로 분해"]
-        WK["② 작업 · 노드 하나 = 소유 경로 + 완료 기준"]
+        PL["① Plan · split the goal into work nodes"]
+        WK["② Work · one node = owned paths + a done criterion"]
         TD["③ TDD · RED → GREEN → REFACTOR"]
-        EG["④ 실행 · Generate → Apply → Verify → Judge"]
+        EG["④ Execute · Generate → Apply → Verify → Judge"]
         PL --> WK --> TD --> EG
-        EG -.->|"트레이스 신호로 재분해"| PL
+        EG -.->|"trace signals trigger re-planning"| PL
     end
 
-    RUN ==> TRC["Span 트리<br/>모든 층 · 귀책 · 소요 · 산출물"]
+    RUN ==> TRC["Span tree<br/>every layer · blame · duration · artifacts"]
     TRC ==> STO[("RunStore")]
-    STO ==> LRN["학습<br/>Calibrator · Distiller · Policy"]
-    LRN ==> BM{{"벤치마크 게이트<br/>홀드아웃"}}
+    STO ==> LRN["Learning<br/>Calibrator · Distiller · Policy"]
+    LRN ==> BM{{"Benchmark gate<br/>held-out goals"}}
     BM ==> INJ["Skills · Budgets · Routing"]
-    INJ -.->|"다음 실행"| RUN
+    INJ -.->|"next run"| RUN
 ```
 
-| 층 | 무엇을 정하나 | 절 |
+| Layer | What it decides | § |
 |---|---|---|
-| ① 계획 | 목표를 **무엇으로 쪼갤지**. 이것도 검증 대상 | §2 |
-| ② 작업 | 노드 하나의 **경계와 완료 기준** | §3 |
-| ③ TDD | 한 노드를 **어떤 순서로** 초록으로 만드나 | §4 |
-| ④ 실행 | 한 단계를 **어떻게 적용·검증**하나 | §5 |
-| 기록 | 위 전부를 **하나의 트리로** | §6 |
-| 학습 | 실행들 **사이에서** 기준을 갱신 | §9 |
+| ① Plan | **what to split the goal into** — itself subject to verification | §2 |
+| ② Work | one node's **boundary and done criterion** | §3 |
+| ③ TDD | **in what order** a node turns green | §4 |
+| ④ Execute | how one step is **applied and verified** | §5 |
+| Record | all of the above **as one tree** | §6 |
+| Learning | updating the criteria **between runs** | §9 |
 
-여기에 공유 자원을 지키는 두 축이 가로지른다 —
-**공간**(한 에디터를 여러 세션이, §7)과 **시간**(한 코드베이스에 기능이 쌓인다, §8).
+Two axes cut across these: **space** (many sessions sharing one editor, §7) and **time**
+(features accumulating in one codebase, §8).
 
-**학습은 실행의 핫패스에 끼어들지 않는다.** 별도 명령으로 돌고, 실행은 그 *결과물만* 읽는다.
-그래야 어떤 실행이든 "그때 어떤 스킬·예산이었는지"가 고정되고 사후 재현이 된다.
+**Learning never runs on the hot path.** It is a separate command; a run only reads its *output*.
+That way every run is pinned to the skills and budgets it actually used, and stays reproducible.
 
 ---
 
-## 2. 계획 층 — 분해도 루프의 대상이다
+## 2. The plan layer — decomposition is also looped
 
-작업 그래프는 사람이 주는 게 아니라 **Agent 가 낸다.** 그러면 당연히 틀릴 수 있다.
-따라서 루프가 두 겹이 된다.
+The work graph is not handed down by a human — **the agent produces it**. So it can be wrong.
+Which means the loop has two nested levels.
 
-| | 안쪽 루프 (§5) | 바깥 루프 (§2) |
+| | Inner loop (§5) | Outer loop (§2) |
 |---|---|---|
-| 고치는 대상 | **코드** | **계획(분해)** |
-| 실패 신호 | 컴파일 · 테스트 · 예산 | **트레이스 신호** |
-| 되먹임 | 에러 → 모델 | 트레이스 요약 → 모델 |
-| 1스텝 비용 | 모델 호출 1회 | 작업 그래프 **전체 실행** |
+| Fixes | **code** | **the plan** |
+| Failure signal | compile · tests · budgets | **trace signals** |
+| Feedback | errors → model | trace summary → model |
+| Cost of one step | one model call | **an entire work-graph run** |
 
-바깥 루프도 **같은 5단계**다 — 생성(분해) → 적용(그래프 확정) → 검증(돌려 보고 신호 수집)
-→ 피드백 → 판정. 같은 엔진이 한 층 위에서 다시 도는 것뿐이다.
+The outer loop has the **same five stages** — generate (decompose) → apply (commit the graph) →
+verify (run it and collect signals) → feed back → judge. It is the same engine one level up.
 
 ```mermaid
 flowchart TB
-    G([목표]) --> P["<b>분해</b> · Agent 가 작업 그래프를 낸다"]
-    P --> PC{"정적 검사<br/>순환 · 소유권 겹침 · 완료 기준 누락"}
-    PC -->|"위반"| PF["Fail → 다시 분해"] --> P
-    PC -->|"통과"| EX["작업 노드 실행<br/>노드마다 RED → GREEN → REFACTOR"]
-    EX --> S{"트레이스 신호<br/>분해가 나빴는가?"}
-    S -->|"정상"| D([완료])
-    S -->|"재시도 폭발 · 소유권 위반 반복<br/>· 헛노드"| RP["<b>그 노드만</b> 세분화<br/>초록 노드는 동결 유지"] --> PC
+    G([goal]) --> P["<b>decompose</b> · the agent emits a work graph"]
+    P --> PC{"static checks<br/>cycles · overlapping ownership · missing criteria"}
+    PC -->|"violation"| PF["Fail → decompose again"] --> P
+    PC -->|"ok"| EX["run the work nodes<br/>each one RED → GREEN → REFACTOR"]
+    EX --> S{"trace signals<br/>was the decomposition bad?"}
+    S -->|"fine"| D([done])
+    S -->|"retry explosion · repeated ownership violations<br/>· vacuous node"| RP["split <b>that node only</b><br/>green nodes stay frozen"] --> PC
 ```
 
-### 2.1 분해의 산출물은 노드 목록이 아니다
+### 2.1 The output of decomposition is not a list of nodes
 
-각 노드에 **무엇으로 끝났다고 판정하나**가 없으면 검증이 불가능하다. 그래서 튜플이어야 한다.
+Without a **done criterion** per node, verification is impossible. So each node is a tuple:
 
 ```
-{ id, 목표, owns[], reads[], dependsOn[], 완료기준 }
+{ id, goal, owns[], reads[], dependsOn[], doneCriterion }
 ```
 
-**`완료기준` 이 그대로 그 노드의 테스트가 된다** → RED 게이트(§4.2)가 그 테스트를 검증한다.
-분해 → 완료 기준 → 테스트 → RED 게이트가 한 줄로 이어진다.
+**`doneCriterion` becomes that node's test**, and the RED gate (§4.2) then verifies the test itself.
+Decomposition → criterion → test → RED gate is one unbroken chain.
 
-### 2.2 나쁜 분해의 신호 — 이미 관측하고 있다
+### 2.2 Signals of a bad decomposition — already observable
 
-바깥 루프가 성립하는 이유는 **분해를 평가할 계측이 이미 있기 때문**이다(§6 Span 트리).
+The outer loop works because **the instrumentation to judge a plan already exists** (§6).
 
-| 신호 | 트레이스에서 | 무엇이 틀렸나 | |
+| Signal | Where it shows | What is wrong | |
 |---|---|---|---|
-| 한 Work span 재시도 N회 초과 | Work 재시도 수 | **노드가 너무 크다** | 동적 |
-| 소유권 위반이 같은 노드에서 반복 | Apply 의 `Fail` 사유 | **경계가 틀렸다** — 남의 파일을 건드려야 끝난다 | 동적 |
-| RED 게이트 헛통과 반복 | RedGate `Fail` | **실질 없는 노드** — 검증할 게 없다 | 동적 |
-| 뒤 노드가 앞 노드 타입을 못 찾음 | VerifyCompile 패턴 | **의존 순서가 뒤바뀜** | 정적 |
-| A → B → A | 작업 그래프 자체 | **순환 의존** | 정적 |
+| one Work span retried more than N times | Work retry count | **the node is too big** | dynamic |
+| ownership violations repeat on the same node | Apply `Fail` reason | **the boundary is wrong** — it cannot finish without touching someone else's files | dynamic |
+| RED gate keeps passing vacuously | RedGate `Fail` | **a node with no substance** — nothing to verify | dynamic |
+| a later node cannot find an earlier node's types | VerifyCompile pattern | **dependency order is inverted** | static |
+| A → B → A | the work graph itself | **cyclic dependency** | static |
 
-### 2.3 정적 검사 — 적용 전에 반려한다
+### 2.3 Static checks — reject before applying
 
-동적 신호는 비싸다(돌려 봐야 안다). 잡을 수 있는 건 미리 잡는다.
-**스킬 `CHECKS` 가 코드에 하는 일을, 계획 검사가 분해에 한다.** 같은 자리, 같은 패턴이다.
+Dynamic signals are expensive (you have to run to get them), so catch what you can up front.
+**What skill `CHECKS` do for code, plan checks do for the decomposition** — same position, same pattern.
 
-- 순환 의존 없음
-- 소유 경로가 노드 간에 겹치지 않음(§7.3)
-- 모든 노드에 완료 기준이 있음
-- 계약 노드가 자기에게 의존하는 모든 노드보다 앞섬
+- no cyclic dependencies
+- no overlapping owned paths between nodes (§7.3)
+- every node has a done criterion
+- the contract node precedes everything that depends on it
 
-### 2.4 단조 세분화 — 발산을 막는다
+### 2.4 Monotone refinement — preventing divergence
 
-계획 루프의 고전적 실패는 **매번 계획이 바뀌어 아무것도 안 끝나는 것**이다.
-그래서 재분해는 원칙적으로 **쪼개기만** 허용한다.
+The classic failure of a planning loop is **the plan changing forever and nothing finishing**.
+So re-planning is, in principle, restricted to **splitting**.
 
 ```mermaid
 flowchart LR
-    A["노드 2 · Inventory 전체<br/>3회 실패"] -->|"세분화"| B1["2a · TryAdd"]
+    A["node 2 · Inventory as a whole<br/>failed 3×"] -->|"refine"| B1["2a · TryAdd"]
     A --> B2["2b · TryRemove"]
-    A --> B3["2c · 용량 제한"]
+    A --> B3["2c · capacity limit"]
 ```
 
-- 초록 노드는 **절대 건드리지 않는다**(§3.2 동결)
-- 노드 크기가 **단조 감소**하므로 유한 스텝에 수렴한다
-- 세분화가 곧 Span 트리에 자식을 다는 것 — **분해 트리 = 트레이스 트리**
+- green nodes are **never touched** (§3.2)
+- node size **decreases monotonically**, so it converges in a finite number of steps
+- refining is literally adding children in the span tree — **the decomposition tree is the trace tree**
 
-**쪼개기로 안 되는 경우가 있다.** 경계 자체가 틀렸다면(결합이 너무 강해 사실 한 노드여야 했다면)
-더 쪼개도 해결되지 않는다. → N회 후 **경계 재설계**로 승격하되 횟수를 제한하고,
-그것도 소진되면 **사람에게 보고한다.** 조용히 발산하느니 멈추고 말하는 게 낫다.
+**Splitting does not always help.** If the boundary itself is wrong (the coupling is so strong that
+it should have been one node), splitting further will not fix it. → After N refinements, escalate to
+a **boundary redesign** with a hard cap; when that is exhausted too, **report to a human.**
+Better to stop and say so than to diverge quietly.
 
-### 2.5 재분해에 되먹이는 것
+### 2.5 What gets fed back when re-planning
 
-에러 문자열이 아니라 **트레이스 요약**이다.
+Not an error string — a **trace summary**.
 
-> `노드 2(Inventory)` 가 3회 실패했고, 그중 2회는 `Assets/Scripts/Quest/` 를 쓰려다
-> 소유권 위반으로 반려됐습니다. 이 노드는 퀘스트 쪽 타입에 의존하고 있습니다.
+> `node 2 (Inventory)` failed 3 times; 2 of those were rejected for trying to write under
+> `Assets/Scripts/Quest/`. This node depends on types owned by Quest.
 
-평평한 로그로는 이런 요약을 만들 수 없다 — §6.3 참조.
+You cannot build that summary from a flat log — see §6.3.
 
 ---
 
-## 3. 작업 층 — 노드 하나
+## 3. The work layer — one node
 
-### 3.1 왜 쪼개는 것이 "효율"인가
+### 3.1 Why splitting *is* the efficiency
 
-히스토리 윈도우·피드백 상한으로 씨름한 건 결국 *한 번에 너무 많이 만든다* 는 문제였다.
+The struggle with history windows and feedback caps came down to one thing:
+*we generate too much at once.*
 
-| | 통째로 생성 | 노드 단위 |
+| | Generate it all | Per node |
 |---|---|---|
-| 실패 귀속 | "어딘가 틀렸다" | **이 작은 변경이 틀렸다** |
-| 스텝당 컨텍스트 | 전체 파일 × 전부 | 해당 노드 + 계약뿐 |
-| 초록인 부분 | 매 스텝 재생성 | **동결 — 다시 만들지 않는다** |
+| Failure attribution | "something is wrong" | **this small change is wrong** |
+| Context per step | every file, every time | just this node and the contract |
+| Parts already green | regenerated every step | **frozen — never rebuilt** |
 
-### 3.2 동결과 소유권
+### 3.2 Freezing and ownership
 
-세 번째가 특히 크다. **[현재]** 스텝 3에서 모델이 스텝 1의 멀쩡한 파일을 다시 뱉는다.
-**[계획]** 노드가 초록이 되면 그 파일은 이후 노드에게 **읽기 전용**이 된다.
+That third row matters most. **[now]** at step 3 the model re-emits the perfectly good file from step 1.
+**[planned]** once a node is green, its files become **read-only** to later nodes.
 
-각 노드는 자기가 쓸 경로를 선언하고, `Apply` 노드가 강제한다.
+Each node declares the paths it will write, and the `Apply` node enforces it:
 
 ```
 { "id": "quest",
@@ -177,112 +182,115 @@ flowchart LR
   "reads": ["Assets/Scripts/Contracts/**"] }
 ```
 
-- 소유 밖 파일을 쓰려 하면 → `Fail`(모델 잘못이므로 피드백으로 고칠 수 있다)
-- 노드 간 소유권이 겹치면 → 시작 자체를 거부한다(나중에 터지느니 지금)
+- writing outside its ownership → `Fail` (the model's fault, so feedback can fix it)
+- overlapping ownership between nodes → refuse to start (better now than later)
 
-이 기계가 그대로 멀티세션에서 재사용된다(§7.3).
+The same machinery is reused for multi-session work (§7.3).
 
 ---
 
-## 4. TDD 사이클 — 한 노드를 초록으로
+## 4. The TDD cycle — turning one node green
 
-### 4.1 정적 타입에서의 RED — 스켈레톤이 필요하다
+### 4.1 RED in a statically typed language needs a skeleton
 
-C#에서 "테스트 먼저"는 **컴파일되지 않는다.** 존재하지 않는 타입을 참조하기 때문이다.
-그래서 RED 단계의 산출물은 `테스트`가 아니라 **`스켈레톤 + 테스트`** 다.
+In C#, "test first" **does not compile** — it references types that do not exist yet.
+So the RED artifact is not a test, it is **skeleton + test**.
 
 ```csharp
-// 스켈레톤 = 계약. 컴파일은 되지만 아직 아무것도 안 한다.
+// The skeleton is the contract. It compiles, but does nothing yet.
 public sealed class Inventory
 {
     public bool TryAdd(ItemId id, int count) => throw new NotImplementedException();
 }
 ```
 
-**이 스켈레톤이 곧 계약이다.** TDD 를 하면 계약 우선이 공짜로 따라온다 —
-다른 노드/세션은 구현이 없어도 이 스켈레톤에 기대어 자기 테스트를 쓸 수 있다.
-**테스트는 실행 가능한 명세다.**
+**That skeleton is the contract.** Doing TDD gets you contract-first for free — another node or
+session can write its own tests against the skeleton before any implementation exists.
+**The test is an executable specification.**
 
-### 4.2 RED 게이트 — 헛통과하는 테스트를 잡는다
+### 4.2 The RED gate — catching tests that pass vacuously
 
 ```mermaid
 flowchart LR
-    S([작업 노드]) --> R["RED<br/>스켈레톤 + 테스트"]
-    R --> RC{"컴파일?"}
-    RC -->|"실패"| R
-    RC -->|"통과"| RT{"테스트가<br/><b>실패</b>하는가?"}
-    RT -->|"통과해 버림"| RV["<b>Fail</b><br/>구현이 없는데 통과 =<br/>이 테스트는 아무것도 검증하지 않는다"] --> R
-    RT -->|"실패 ✅"| G["GREEN<br/>구현"]
-    G --> GT{"테스트 통과?"}
-    GT -->|"실패"| G
-    GT -->|"통과"| RF["REFACTOR"]
-    RF --> RFG{"테스트 유지<br/>+ 구조 예산?"}
-    RFG -->|"위반"| RF
-    RFG -->|"통과"| D([노드 동결])
+    S([work node]) --> R["RED<br/>skeleton + test"]
+    R --> RC{"compiles?"}
+    RC -->|"no"| R
+    RC -->|"yes"| RT{"does the test<br/><b>fail</b>?"}
+    RT -->|"it passes"| RV["<b>Fail</b><br/>passing with no implementation<br/>= this test verifies nothing"] --> R
+    RT -->|"fails ✅"| G["GREEN<br/>implement"]
+    G --> GT{"tests pass?"}
+    GT -->|"no"| G
+    GT -->|"yes"| RF["REFACTOR"]
+    RF --> RFG{"tests still green<br/>+ structure budget?"}
+    RFG -->|"violated"| RF
+    RFG -->|"ok"| D([freeze the node])
 ```
 
-가운데 `RT` 가 이 절의 전부다. **[현재] 루프의 최대 약점은 모델이 테스트와 구현을 둘 다 쓴다는 것**이다.
-자기 시험을 자기가 채점한다. 그래서 피드백에 *"테스트를 느슨하게 고쳐 통과시키지 마세요"* 라고
-못을 박아 뒀는데, 그건 사실 문제가 있다는 **자백**이다.
+The `RT` diamond is the whole point of this section. **[now] the loop's biggest weakness is that the
+model writes both the test and the implementation** — grading its own exam. That is why the feedback
+text says *"do not weaken the test to make it pass"* — which is really an **admission** that it can.
 
-RED 게이트는 이걸 구조로 막는다 — **구현 없이 통과하는 테스트는 헛것이다.**
+The RED gate turns that into structure: **a test that passes without an implementation is worthless.**
 
-> 발명이 아니다. 터치 입력을 검증할 때 손으로 한 것과 같다 — 프레임을 안 넘기고 읽으면
-> `Expected: Began / But was: None` 으로 **실패하는지**부터 확인했다.
-> 그때는 사람이 했고, 이제 노드가 한다. ([WORKLOG](WORKLOG.md))
+> This is not an invention. It is what was done by hand while verifying touch input — check first
+> that reading before advancing a frame **fails** with `Expected: Began / But was: None`.
+> A human did it then; a node does it now. ([WORKLOG](WORKLOG.md))
 
-### 4.3 REFACTOR — 판정 기준이 없으면 무작위 변경이다
+### 4.3 REFACTOR without a criterion is just random change
 
-Red→Green 은 검증된다. 그런데 *"SOLID 하게, 응집도 높게 고친다"* 는 무엇으로 판정하나?
-**테스트가 초록인 건 망가뜨리지 않았다는 뜻일 뿐, 좋아졌다는 뜻이 아니다.**
+Red→Green is verifiable. But what decides that *"make it SOLID, raise cohesion"* succeeded?
+**Green tests only mean you did not break it — not that you improved it.**
 
-이 프로젝트의 답은 정해져 있다 — **재서 예산으로 만든다.**
-시간 예산 → 렌더 예산 → **구조 예산**.
+This project's answer is already fixed: **measure it and make it a budget.**
+Time budget → render budget → **structure budget**.
 
-| 지표 | 잡으려는 것 | 비용 |
+| Metric | What it catches | Cost |
 |---|---|---|
-| 파일·메서드 길이 | 비대한 책임 | 싸다 |
-| 타입당 public 표면 | 캡슐화 붕괴 | 싸다 |
-| 구현체가 1개뿐인 인터페이스 | **과도한 추상화** | 싸다 |
-| 타입 간 의존 방향 · 순환 | 결합도 | 중간(참조 그래프) |
+| file / method length | bloated responsibility | cheap |
+| public surface per type | broken encapsulation | cheap |
+| interfaces with exactly one implementation | **over-abstraction** | cheap |
+| dependency direction and cycles | coupling | medium (reference graph) |
 
-기존 스킬 `CHECKS` 기계(`Skills/`, `CSharpSource`)를 **예산으로 승격**하는 것이라 새 인프라가 아니다.
+This promotes the existing skill `CHECKS` machinery (`Skills/`, `CSharpSource`) into a budget —
+not new infrastructure.
 
-### 4.4 지표는 양방향이어야 한다
+### 4.4 The metric has to cut both ways
 
-"추상화가 늘면 좋다"고 보상하면 모델은 20줄짜리 클래스에 인터페이스 3개와 팩토리를 붙인다.
-LLM 의 알려진 실패 모드다. 그래서 구조 예산은 응집도를 올리되 **간접 계층은 늘리지 않는다.**
-`구현체 1개뿐인 인터페이스`, `위임만 하는 래퍼` 같은 YAGNI 신호를 위반으로 잡는다.
+Reward "more abstraction is better" and the model will attach three interfaces and a factory to a
+20-line class. That is a known LLM failure mode. So the structure budget raises cohesion while
+**refusing to add indirection**: interfaces with a single implementor, wrappers that only delegate,
+and similar YAGNI signals are violations.
 
-단, 스킬 원칙을 지킨다 — *"이론상 나쁜 것이 아니라 **모델이 실제로 하는 실수**를 겨냥하고,
-기존 산출물로 오탐부터 확인."* 구조 지표도 **과거 산출물에 먼저 돌려 보고** 채택한다.
+The skill rule still applies — *target mistakes models actually make, and measure the false-positive
+rate against existing output first.* Structure metrics get **backtested on past output** before adoption.
 
-### 4.5 비용 — EditMode 를 우선한다
+### 4.5 Cost — prefer EditMode
 
-RED 게이트는 검증 사이클을 하나 더 쓴다. 멀티세션에서는 에디터 리스 경합이 늘어난다.
+The RED gate spends one extra verification cycle, and in multi-session work that increases editor
+lease contention.
 
-완화책: **순수 로직은 EditMode 테스트로 돌린다.** 플레이모드 진입도 도메인 리로드 대기도 없다.
-프레임·입력·코루틴이 필요한 것만 PlayMode 로 남긴다.
-**[현재]** 우리 테스트는 전부 PlayMode(`Assets/Tests/PlayMode/`)라 상당수가 내려갈 수 있다.
-**[미실측]** 얼마나 빨라지는지.
+Mitigation: **run pure logic as EditMode tests.** No play mode entry, no domain reload wait.
+Keep PlayMode only for frames, input, and coroutines.
+**[now]** all our tests are PlayMode, so many could move down.
+**[unmeasured]** how much faster that actually is.
 
 ---
 
-## 5. 실행 그래프 — 한 단계
+## 5. The execution graph — one step
 
-### 5.1 그래프
+### 5.1 The graph
 
 ```mermaid
 flowchart LR
-    S([작업 노드의 한 단계]) --> GEN["Generate<br/>백엔드 호출"]
-    GEN -->|"형식 위반"| FB
-    GEN --> GATE["SkillCheck<br/>적용 전 정적 검사"]
-    GATE --> AP["Apply<br/>파일 쓰기 · 소유권 강제"]
+    S([one step of a work node]) --> GEN["Generate<br/>call the backend"]
+    GEN -->|"format violation"| FB
+    GEN --> GATE["SkillCheck<br/>static checks before applying"]
+    GATE --> AP["Apply<br/>write files · enforce ownership"]
     AP --> VC["VerifyCompile"]
-    VC --> VR{{"런타임 검증"}}
-    VR -->|"테스트 있음"| VT["Tests"]
-    VR -->|"테스트 없음"| VA["Assert · eval"]
-    VT --> VP["VerifyPerf<br/>시간 · 렌더 예산"]
+    VC --> VR{{"runtime verification"}}
+    VR -->|"tests exist"| VT["Tests"]
+    VR -->|"no tests"| VA["Assert · eval"]
+    VT --> VP["VerifyPerf<br/>time · render budgets"]
     VA --> VP
     VP --> J([Judge])
 
@@ -294,14 +302,15 @@ flowchart LR
     VP -->|Fail| FB
     FB -->|"attempt+1"| GEN
 
-    VC -.->|Fatal| AB([중단])
+    VC -.->|Fatal| AB([abort])
     VT -.->|Fatal| AB
 ```
 
-**[현재]** 이 흐름은 이미 동작한다. 다만 [`AgentLoop.RunAsync`](../Orchestrator/Loop/AgentLoop.cs) 안에
-`for` + `if` + `continue` 로 **하드코딩**돼 있다. 아래는 그것을 데이터로 끌어낸 것이다.
+**[now]** this flow already works — but it is **hardcoded** inside
+[`AgentLoop.RunAsync`](../Orchestrator/Loop/AgentLoop.cs) as `for` + `if` + `continue`.
+What follows is that flow lifted into data.
 
-### 5.2 노드 계약
+### 5.2 The node contract
 
 ```csharp
 public interface INode
@@ -311,267 +320,273 @@ public interface INode
 }
 
 public sealed record NodePolicy(
-    int       MaxRetries   = 0,      // 노드 자체 재시도(모델 재호출 아님)
+    int       MaxRetries   = 0,      // retry the node itself (not another model call)
     TimeSpan? Timeout      = null,
-    bool      FatalOnError = false); // 예외를 Fatal 로 볼지 Fail 로 볼지
+    bool      FatalOnError = false); // is an exception Fatal, or just Fail?
 ```
 
-노드는 **자기 판단만** 한다. 라우팅·재시도·타이밍·기록은 전부 실행기가 소유한다.
-노드가 `continue` 를 부르지 않는다는 게 핵심이다 — 흐름 제어가 노드 밖으로 나오면서
-"검증을 하나 추가한다"가 *수술*에서 *등록*으로 바뀐다.
+A node only makes **its own judgment**. Routing, retries, timing, and recording belong to the executor.
+The point is that a node never calls `continue` — once flow control leaves the nodes, "add one more
+verification" changes from *surgery* into *registration*.
 
-**[현재]** `EvalWithRetryAsync`(도메인 리로드 직후 1회 재시도), 플레이모드 ready 게이팅,
-`recompile_status` 폴링 — 전부 손으로 짠 재시도다. 정책으로 올리면 노드마다 다시 짜지 않는다.
+**[now]** `EvalWithRetryAsync` (one retry right after a domain reload), play-mode ready gating, and
+`recompile_status` polling are all hand-rolled retries. As policy they stop being rewritten per node.
 
-### 5.3 NodeOutcome — 다섯 갈래
+### 5.3 NodeOutcome — five branches
 
-| 결과 | 누구 잘못인가 | 라우팅 |
+| Outcome | Whose fault | Routing |
 |---|---|---|
-| `Pass` | — | 다음 노드 |
-| `Fail` | **모델.** 고칠 수 있다 | 피드백 → 재생성 |
-| `Skip` | — (기준 없음 / 타깃 미지원) | 다음 노드 (통과로 친다) |
-| `Blocked` | **다른 세션.** 내 코드는 멀쩡하다 | 대기 후 재시도 (§7.5) |
-| `Fatal` | **인프라.** 모델이 고칠 수 없다 | 즉시 중단 |
+| `Pass` | — | next node |
+| `Fail` | **the model.** It can fix this | feedback → regenerate |
+| `Skip` | — (no criterion / target does not support it) | next node (counts as passing) |
+| `Blocked` | **another session.** My code is fine | wait and retry (§7.5) |
+| `Fatal` | **infrastructure.** The model cannot fix it | abort immediately |
 
-**가운데 열이 이 표의 전부다.** 결과 갈래는 "무엇이 일어났는가"가 아니라
-**"누구 잘못인가"** 로 나뉜다. 귀책이 라우팅을 결정하기 때문이다 — 모델 잘못만 모델에게 되돌린다.
+**The middle column is the whole table.** The branches are not split by *what happened* but by
+**whose fault it is** — because blame decides routing. Only the model's mistakes go back to the model.
 
-`Fail`/`Fatal` 분리는 비싸게 얻었다. 리컴파일 직후 플레이모드 진입 거부를
-*"네 코드가 틀렸다"* 로 되먹여 멀쩡한 코드를 재생성하며 스텝을 낭비한 적이 있다.
-**[현재]** 예외를 던져 암묵적으로 지키지만, 그래프에서는 **노드 정책으로 명시**된다.
+Separating `Fail` from `Fatal` was expensive to learn. A play-mode entry refused right after a
+recompile was once fed back as *"your code is wrong"*, burning a step regenerating perfectly good code.
+**[now]** an exception enforces this implicitly; in the graph it becomes **explicit policy**.
 
-`Skip` 은 성공 출구를 하나로 만든다. **[현재]** "기준 없음 → 즉시 성공 return" 이
-[세 군데](../Orchestrator/Loop/AgentLoop.cs) 흩어져 있다(142·176·187행).
-판정은 파이프라인 끝에서 한 번만 해야 한다.
+`Skip` collapses the success exits into one. **[now]** "no criterion → return success immediately"
+appears in [three places](../Orchestrator/Loop/AgentLoop.cs). Judgment should happen once, at the end.
 
-### 5.4 자원 리스 — 정직한 병렬성
+### 5.4 Resource leases — honest parallelism
 
-**에디터는 배타 자원이다.** Tests 도 Perf 도 플레이모드에 들어가야 해서 동시에 못 돈다.
-"검증을 병렬화한다"는 이 타깃에서 **성립하지 않는다.**
+**The editor is an exclusive resource.** Both Tests and Perf must enter play mode, so they cannot run
+at the same time. "Parallelize verification" **does not hold** for this target.
 
-진짜 병렬이 가능한 곳은 **생성**이다. 느린 건 검증(수십 초)이 아니라 모델 호출(수 분)이다.
+Where parallelism is real is **generation**. The slow part is the model call (minutes), not
+verification (tens of seconds).
 
 ```mermaid
 flowchart LR
-    S([작업 노드]) --> A["Claude"] & B["Codex"]
-    A --> Q{{"검증 큐 · Editor 리스 = 1"}}
+    S([work node]) --> A["Claude"] & B["Codex"]
+    A --> Q{{"verification queue · editor lease = 1"}}
     B --> Q
-    Q --> V["순차 검증"]
-    V -->|"먼저 통과한 후보"| W([채택])
+    Q --> V["verify sequentially"]
+    V -->|"first candidate to pass"| W([adopt])
 ```
 
-**[계획]** best-of-N. 이미 증명한 agent-agnostic 위에 그대로 얹힌다 —
-*"두 에이전트가 같은 루프를 돈다"* 에서 *"두 에이전트를 경쟁시키고 검증이 심판한다"* 로.
+**[planned]** best-of-N. It sits directly on top of the agent-agnostic property already demonstrated —
+from *"two agents can drive the same loop"* to *"two agents compete and verification is the judge."*
 
-### 5.5 검증 노드가 실제로 하는 통신
+### 5.5 What a verification node actually talks to
 
-**[현재]** 실측으로 확정된 순서다. 특히 **폴링과 ready 게이팅**은 없으면 반드시 깨진다.
+**[now]** this order was established by measurement. In particular, **polling and ready gating** are
+not optional — without them it breaks.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant N as 검증 노드
+    participant N as verify node
     participant U as unity CLI
     participant E as Editor · pipeline :7800
 
     N->>U: recompile
-    U->>E: 트리거
-    loop completed 까지 폴링
+    U->>E: trigger
+    loop poll until completed
         N->>U: recompile_status
         U-->>N: compiling → completed{failed, errors[]}
     end
 
-    alt 컴파일 에러
-        N-->>N: Fail → 피드백
-    else 통과
+    alt compile errors
+        N-->>N: Fail → feedback
+    else ok
         N->>U: editor_status
         U-->>N: ready | compiling | domainReloadInProgress
-        Note over N,E: ready 아니면 게이팅 후 재시도<br/>끝내 아니면 Fatal — 모델 잘못이 아니다
+        Note over N,E: if not ready, gate and retry<br/>if it never becomes ready → Fatal, not the model's fault
     end
 
-    alt 테스트 파일 있음
+    alt test files exist
         N->>U: run_tests --mode PlayMode --async_tests
-        loop completed 까지 폴링
+        loop poll until completed
             N->>U: test_status
             U-->>N: summary{total, passed, failed}
         end
-    else ASSERT 스니펫
+    else ASSERT snippet
         N->>U: editor_play
-        N->>U: eval — SnippetGuard 통과분만
-        U-->>N: "OK" | 실패 사유
+        N->>U: eval — only what SnippetGuard allows
+        U-->>N: "OK" | reason for failure
         N->>U: editor_stop
     end
 ```
 
-폴링이 두 번 나오는 게 우연이 아니다. **PlayMode 테스트는 동기 실행이 불가능**하고,
-**리컴파일 직후에는 플레이모드 진입이 조용히 거부**된다. 둘 다 실측으로 알아낸 제약이라,
-그래프에서는 노드 안 임시방편이 아니라 **정책(재시도·타임아웃)** 으로 표현한다.
+Polling appearing twice is not a coincidence. **PlayMode tests cannot run synchronously**, and
+**play mode entry is silently refused right after a recompile**. Both were found by measurement, so
+in the graph they are expressed as **policy (retry, timeout)** rather than ad-hoc code inside a node.
 
 ---
 
-## 6. 트레이스 — 모든 층을 묶는 척추
+## 6. The trace — the spine that ties every layer together
 
-### 6.1 평평하지 않다, 트리다
+### 6.1 It is a tree, not a flat list
 
-계획 · 작업 · TDD · 실행이 **하나의 트레이스 트리**로 묶인다.
-따로 기록하면 "이 실패가 어느 작업의 어느 단계에서 왔나"를 잃는다.
+Plan, work, TDD, and execution are bound into **one trace tree**. Record them separately and you lose
+"which step of which work node did this failure come from".
 
 ```csharp
 public sealed record Span(
     string   RunId,
     string   SpanId,
-    string?  ParentSpanId,     // ← 이 한 줄이 트리를 만든다
+    string?  ParentSpanId,     // ← this one line makes it a tree
     SpanKind Kind,             // Work | Phase | Node | Lease
     string   Name,             // "Inventory.TryAdd" | "RED" | "VerifyCompile" | "editor"
-    string?  SessionId,        // 멀티세션에서 누가 (§7)
+    string?  SessionId,        // who, in multi-session work (§7)
     Outcome  Outcome,          // Pass | Fail | Skip | Blocked | Fatal
-    string?  BlamedOn,         // Blocked 일 때 누구 때문인지
+    string?  BlamedOn,         // when Blocked, who is blocking
     double   Ms,
     IReadOnlyList<string> Errors,
     IReadOnlyList<string> Artifacts);
 ```
 
-실행기가 발행한다(노드가 아니라). 텍스트 로그로는 학습이 안 된다 — **튜플이어야 한다.**
-`Kind` 가 네 종류인 게 우연이 아니다: 세 실행 층 + **리스**(§7.4). 대기도 1급 기록 대상이다.
+The executor emits these, not the nodes. You cannot learn from a text log — **it has to be tuples.**
+`Kind` having four values is not arbitrary: the three execution layers plus the **lease** (§7.4).
+Waiting is a first-class thing to record.
 
-### 6.2 한 실행의 트리
+### 6.2 One run's tree
 
-**[계획]** 트레이스 시각화(§11 구축 순서 4단계)가 자동 생성할 모양:
+**[planned]** what the trace visualization (§11, build order step 4) will generate:
 
 ```
-run 20260816-1442  "퀘스트 보상이 인벤토리에 들어간다"                  ✅ 6m12s
-├─ work  계약 · ItemId / IInventory                                   ✅ 1m03s
-│  ├─ RED    스켈레톤 + 테스트                                        ✅ 41s
-│  │  ├─ Generate        claude                                      ✅ 28s
-│  │  ├─ lease  editor   대기 0s                                     ✅
-│  │  ├─ Apply                                                       ✅ 0.3s
-│  │  ├─ VerifyCompile                                               ✅ 9s
-│  │  └─ RedGate         테스트가 실패하는가                          ✅ 3s
-│  └─ GREEN                                                          ✅ 22s
-├─ work  Inventory.TryAdd                                            ✅ 2m28s
-│  ├─ RED    (2회)                                                   ✅
-│  │  └─ RedGate         Fail — 구현이 없는데 통과함(헛테스트)
-│  ├─ GREEN                                                          ✅
-│  └─ REFACTOR  구조 예산  public 표면 7→3                            ✅
-└─ work  보상 지급 연동                                              ✅ 2m41s
-   ├─ lease  editor      대기 1m14s  ← 세션 B 보유                    ⏳
+run 20260816-1442  "quest rewards land in the inventory"                     ✅ 6m12s
+├─ work  contract · ItemId / IInventory                                      ✅ 1m03s
+│  ├─ RED    skeleton + test                                                 ✅ 41s
+│  │  ├─ Generate        claude                                              ✅ 28s
+│  │  ├─ lease  editor   waited 0s                                           ✅
+│  │  ├─ Apply                                                               ✅ 0.3s
+│  │  ├─ VerifyCompile                                                       ✅ 9s
+│  │  └─ RedGate         does the test fail?                                 ✅ 3s
+│  └─ GREEN                                                                  ✅ 22s
+├─ work  Inventory.TryAdd                                                    ✅ 2m28s
+│  ├─ RED    (2 attempts)                                                    ✅
+│  │  └─ RedGate         Fail — passed with no implementation (vacuous test)
+│  ├─ GREEN                                                                  ✅
+│  └─ REFACTOR  structure budget  public surface 7→3                         ✅
+└─ work  reward payout integration                                           ✅ 2m41s
+   ├─ lease  editor      waited 1m14s  ← held by session B                   ⏳
    └─ ...
 ```
 
-이 트리 하나로 답이 나오는 것들:
+This one tree answers:
 
-| 질문 | 어디서 |
+| Question | From |
 |---|---|
-| 어느 **작업**이 제일 헤맸나 | Work span 재시도 → **분해 품질**(§2.2) |
-| 모델이 어떤 **헛테스트**를 쓰나 | RedGate `Fail` 누적 → Distiller(§9.2) |
-| 멀티세션 병목이 진짜 있나 | Lease span 대기 시간 → §7 설계 검증 |
-| 남 때문에 막힌 시간 | `Blocked` + `BlamedOn` 집계 |
-| 어디서부터 재개하나 | 마지막 `Pass` span |
-| 예산을 얼마로 잡아야 하나 | 측정 span 분포 → Calibrator(§9.1) |
+| which **work item** struggled most | Work span retries → **decomposition quality** (§2.2) |
+| what **vacuous tests** this model writes | accumulated RedGate `Fail` → Distiller (§9.2) |
+| whether the multi-session bottleneck is real | Lease span wait time → validates §7 |
+| time lost to someone else | `Blocked` + `BlamedOn` aggregation |
+| where to resume | last `Pass` span |
+| what to set a budget to | distribution of measurement spans → Calibrator (§9.1) |
 
-**결과 갈래를 "누구 잘못인가"로 나눈 것(§5.3)이 여기서 회수된다.** 모든 span 이 귀책을 들고 있어서,
-집계하면 *"모델 잘못 4건, 남 때문에 막힘 1m14s, 인프라 0건"* 이 그냥 나온다.
+**Splitting outcomes by "whose fault" (§5.3) pays off here.** Every span carries blame, so an
+aggregate produces *"4 model mistakes, 1m14s blocked by others, 0 infrastructure failures"* for free.
 
-### 6.3 왜 트리가 아니면 안 되는가
+### 6.3 Why a flat log will not do
 
-평평한 이벤트 목록으로도 로그는 남는다. 하지만 **학습이 안 된다.**
-"이 컴파일 에러"가 *어느 작업 노드의 RED 단계에서 몇 번째 시도인지* 를 모르면,
-그건 그냥 에러 문자열이지 학습 신호가 아니다. 재분해 피드백(§2.5)도 만들 수 없다.
+A flat event list still produces a log. But **you cannot learn from it.**
+If you do not know *which work node, which phase, which attempt* a compile error belongs to, it is
+just an error string, not a learning signal — and the re-planning feedback in §2.5 cannot be built.
 
-**`ParentSpanId` 한 줄이 로그를 데이터셋으로 바꾼다.**
+**`ParentSpanId` is what turns a log into a dataset.**
 
 ### 6.4 RunStore
 
-**[현재]** 실행 로그는 `%TEMP%/agentloop-runs/` 로 간다. 즉 *"모델이 무엇을 틀렸고
-무엇으로 고쳐서 통과했는가"* 라는 제일 구하기 힘든 데이터를 만들어 놓고 OS 가 지우게 두고 있다.
+**[now]** run logs go to `%TEMP%/agentloop-runs/`. In other words the hardest-to-obtain data there is —
+*what the model got wrong and what fixed it* — is produced and then left for the OS to delete.
 
-**[계획]** 레포 루트의 `.agentloop/` 로 옮긴다(gitignore).
+**[planned]** move to `.agentloop/` at the repo root (gitignored).
 
 ```
 .agentloop/runs/<runId>/
-  run.json          # 목표·백엔드·타깃·옵션 스냅샷·판정·벽시계
-  trace.jsonl       # Span 스트림 (append-only, ParentSpanId 로 트리 복원)
-  spans/<spanId>/   # 큰 산출물은 span 에 매달아 둔다
+  run.json          # goal · backend · target · option snapshot · verdict · wall clock
+  trace.jsonl       # Span stream (append-only; the tree is rebuilt from ParentSpanId)
+  spans/<spanId>/   # large artifacts hang off their span
     reply.txt · edits/*.cs · compile.log · test-result.json
   evidence/*.png
 ```
 
-- `run.json` 이 **그때의 스킬·예산까지 스냅샷**한다. 안 그러면 나중에 비교가 무의미해진다.
-- `trace.jsonl` 은 **추가 전용**이다. 실행 중 죽어도 거기까지가 남고 트리를 복원할 수 있다.
-- 비밀은 저장하지 않는다. UGS 경로에서도 키 *이름*만 기록하는 현재 규칙을 유지한다.
-- 포폴용으로 남길 실행은 `docs/evidence/` 로 승격한다(작업 데이터와 증거를 섞지 않는다).
+- `run.json` snapshots **the skills and budgets in effect at the time** — otherwise later comparison is meaningless.
+- `trace.jsonl` is **append-only**, so a crashed run still leaves a rebuildable tree.
+- No secrets are stored. The existing rule of logging only key *names* (never values) stands.
+- Runs worth keeping as portfolio evidence are promoted to `docs/evidence/` — working data and
+  evidence do not mix.
 
 ---
 
-## 7. 멀티세션 — 한 에디터, 여러 세션
+## 7. Multi-session — one editor, many sessions
 
-실제 개발은 기능 하나로 끝나지 않는다. 퀘스트와 인벤토리를 동시에 만들고, 관련 에디터 툴도 같이 만든다.
-그런데 **퀘스트는 인벤토리에 결합돼 있다** — 보상으로 아이템을 주고, 획득 여부로 조건이 풀린다.
+Real development is not one feature at a time. You build quests and inventory together, plus the
+editor tooling for them. And **quests are coupled to inventory** — rewards grant items, and having an
+item is what clears a condition.
 
-세션을 여럿 띄워 동시에 돌리면 한쪽이 멈춘다. 왜 멈추는지부터 정확히 봐야 한다.
+Run several sessions against one editor and one of them stalls. Start by being precise about why.
 
-### 7.1 실제로 충돌하는 것
+### 7.1 What actually collides
 
-| 충돌 지점 | 이유 | 증상 |
+| Collision | Why | Symptom |
 |---|---|---|
-| **컴파일 도메인** | `Assets/` 는 하나, 리컴파일은 전역 | **남이 낸 에러가 내 모델 피드백으로 들어간다** |
-| **도메인 리로드** | 리로드가 진행 중인 명령을 무효화 | `eval`·`test_status` 타임아웃 = "멈춘다" |
-| **플레이모드** | 배타 자원 | `editor_play` 가 조용히 거부됨 |
-| **파일** | 같은 파일 동시 편집 | 마지막 쓰기가 이김, 앞의 작업이 사라짐 |
+| **Compile domain** | one `Assets/`, and recompiles are global | **someone else's errors arrive as my model's feedback** |
+| **Domain reload** | a reload invalidates commands already in flight | `eval` / `test_status` timeouts — the "stall" |
+| **Play mode** | exclusive resource | `editor_play` is silently refused |
+| **Files** | two writers on one file | last write wins, earlier work vanishes |
 
-제일 위험한 건 첫 줄이다. 세션 A가 깨진 코드를 쓰면 세션 B의 컴파일 검증도 실패하고,
-**B의 모델이 자기가 쓰지도 않은 코드의 에러를 받아 멀쩡한 파일을 재생성한다.**
-인프라 실패를 되먹여 스텝을 낭비했던 것과 같은 부류인데, 이번엔 원인이 "남"이다.
-→ 그래서 §5.3 에 `Blocked` 가 있다.
+The first row is the dangerous one. If session A writes broken code, session B's compile check fails
+too, and **B's model receives errors from code it never wrote and regenerates perfectly good files.**
+Same class of waste as feeding back infrastructure failures — except the cause is *someone else*.
+→ hence `Blocked` in §5.3.
 
-### 7.2 세션 그래프 — 계약을 먼저 잠근다
+### 7.2 The session graph — lock the contract first
 
-결합된 컨텐츠를 병렬로 만들 때의 진짜 문제는 에디터가 아니라 **합의**다.
-두 세션이 각자 `IInventory` 를 발명하면 합쳐지지 않는다. 그리고 **에이전트는 서로 협상할 수 없다.**
+When building coupled content in parallel, the real problem is not the editor — it is **agreement**.
+If two sessions each invent their own `IInventory`, the results do not merge.
+And **agents cannot negotiate with each other.**
 
 ```mermaid
 flowchart TB
-    G([목표: 퀘스트 · 인벤토리 · 에디터 툴]) --> C["계약 세션<br/>공유 타입 확정 후 <b>잠금</b>"]
-    C --> S1["세션 A · 인벤토리<br/>owns Scripts/Inventory/**"]
-    C --> S2["세션 B · 퀘스트<br/>owns Scripts/Quest/**"]
-    C --> S3["세션 C · 에디터 툴<br/>owns Editor/QuestTool/**"]
-    S1 --> I{{"통합 게이트<br/>전체 스위트 + 교차 시나리오"}}
+    G([goal: quest · inventory · editor tool]) --> C["contract session<br/>settle shared types, then <b>lock</b>"]
+    C --> S1["session A · inventory<br/>owns Scripts/Inventory/**"]
+    C --> S2["session B · quest<br/>owns Scripts/Quest/**"]
+    C --> S3["session C · editor tool<br/>owns Editor/QuestTool/**"]
+    S1 --> I{{"integration gate<br/>full suite + cross-feature scenarios"}}
     S2 --> I
     S3 --> I
-    I -->|"실패"| R["수리 세션 · 넓은 소유권"] --> I
-    I -->|"통과"| D([완료])
+    I -->|"fail"| R["repair session · wider ownership"] --> I
+    I -->|"pass"| D([done])
 ```
 
-계약 파일은 **아무도 소유하지 않는다**(읽기 전용). 세션이 계약을 고치려 들면 `Fail` 로 반려한다.
-"계약이 틀렸다"는 판단은 세션이 아니라 **위층**(§2)이 한다.
+Contract files are **owned by nobody** (read-only). A session that tries to change the contract gets a
+`Fail`. Deciding that *the contract is wrong* belongs to the **layer above** (§2).
 
-**세션 그래프는 작업 그래프(§2)의 분산 버전이다.** 같은 분해를 한 프로세스에서 순차로 돌리면 작업 그래프,
-여러 세션에 나눠 주면 세션 그래프다. 그리고 §4.1 의 스켈레톤이 그대로 이 계약 역할을 한다.
+**The session graph is the distributed form of the work graph (§2).** Run the same decomposition
+sequentially in one process and it is a work graph; hand it to several sessions and it is a session
+graph. The skeleton from §4.1 serves as the contract in both.
 
-### 7.3 소유권
+### 7.3 Ownership
 
-§3.2 의 기계를 그대로 쓴다. 세션 시작 시 소유권이 겹치면 시작을 거부한다.
+Exactly the machinery from §3.2. If ownership overlaps at session start, refuse to start.
 
-### 7.4 에디터 리스 — 대기를 "멈춤"이 아니라 "줄서기"로
+### 7.4 The editor lease — turn "stalled" into "queued"
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as 세션 A
+    participant A as session A
     participant L as Lease Broker
-    participant B as 세션 B
+    participant B as session B
     participant E as Editor
 
-    par 생성은 병렬 — 리스 불필요
-        A->>A: Generate (모델 호출 · 느림)
-        B->>B: Generate (모델 호출 · 느림)
+    par generation runs in parallel — no lease needed
+        A->>A: Generate (model call · slow)
+        B->>B: Generate (model call · slow)
     end
 
     A->>L: acquire(editor)
     L-->>A: granted · ttl 90s
     B->>L: acquire(editor)
-    L-->>B: queued · 앞에 1개
-    Note over B: 멈춘 게 아니라 대기 중임이 로그에 보인다
+    L-->>B: queued · 1 ahead
+    Note over B: not stalled — the wait is visible in the log
 
     A->>E: recompile → play → assert → stop
     A->>L: release
@@ -580,296 +595,314 @@ sequenceDiagram
     B->>L: release
 ```
 
-1. **리스 단위는 명령이 아니라 검증 시퀀스 전체**다. `recompile`·`editor_play`·`eval`·`editor_stop` 을
-   따로 잠그면 그 틈에 남이 끼어든다.
-2. **TTL + 하트비트.** 죽은 세션이 리스를 영원히 쥐면 전원이 멈춘다. 만료되면 회수한다.
-3. **대기는 보여야 한다.** `"에디터 리스 대기 중 — 앞에 1개"` 가 찍히면 그건 버그가 아니라 설계다.
-   지금 "멈춘다"고 느끼는 것의 절반은 **대기가 안 보여서**다.
+1. **The lease covers the whole verification sequence, not individual commands.** Lock
+   `recompile`, `editor_play`, `eval`, and `editor_stop` separately and someone slips into the gap.
+2. **TTL + heartbeat.** A dead session holding the lease forever stops everyone. Expire and reclaim it.
+3. **The wait must be visible.** `"waiting for editor lease — 1 ahead"` is design, not a bug.
+   Half of what feels like "stalling" today is simply **an invisible wait**.
 
-생성이 리스 밖이라는 게 핵심이다(§5.4). 검증을 직렬화해도 처리량은 세션 수에 거의 비례해 늘어난다.
+Generation being outside the lease is the key (§5.4). Even with serialized verification, throughput
+scales close to linearly with session count.
 
-### 7.5 신호 귀속 — 남의 에러를 내 잘못으로 삼지 않는다
+### 7.5 Blame attribution — someone else's error is not mine
 
 ```mermaid
 flowchart TB
-    E["컴파일 에러 N건<br/>(파일 경로 포함)"] --> Q{"에러 난 파일이<br/>내 소유인가?"}
-    Q -->|"전부 내 것"| F["<b>Fail</b> · 모델에 피드백"]
-    Q -->|"전부 남의 것"| B["<b>Blocked</b> · 대기 후 재시도<br/>모델에 알리지 않음"]
-    Q -->|"섞임"| M["내 것만 Fail<br/>남의 것은 기록만"]
+    E["N compile errors<br/>(with file paths)"] --> Q{"is the failing file<br/>mine?"}
+    Q -->|"all mine"| F["<b>Fail</b> · feed back to the model"]
+    Q -->|"all theirs"| B["<b>Blocked</b> · wait and retry<br/>never shown to the model"]
+    Q -->|"mixed"| M["Fail on mine only<br/>record theirs"]
 ```
 
-- **컴파일**: `recompile_status` 의 에러가 파일 경로를 주므로 소유권으로 가른다.
-- **테스트**: `run_tests --filter` 로 내 어셈블리·네임스페이스만 돌린다(**[현재]** 있는 기능).
-- **성능/렌더**: 측정이 전역이라 다른 세션의 플레이모드와 겹치면 오염된다 → **리스 안에서만** 측정한다.
+- **Compile**: `recompile_status` errors carry file paths, so ownership splits them.
+- **Tests**: `run_tests --filter` restricts to my assembly/namespace (**[now]** already supported).
+- **Perf / render**: measurement is global, so another session's play mode contaminates it →
+  **measure only inside the lease.**
 
-`Blocked` 에는 백오프 상한이 필요하다. 무한 대기 대신 N회 후 "세션 X 때문에 진행 불가"로 보고한다.
-**교착을 조용히 견디지 말고 드러내야 한다.**
+`Blocked` needs a backoff cap. Instead of waiting forever, after N attempts report
+"blocked by session X". **Do not endure a deadlock quietly — surface it.**
 
-### 7.6 통합 게이트
+### 7.6 The integration gate
 
-각자 초록이어도 합쳐서 도는지는 별개다. *"퀘스트 보상이 실제로 인벤토리에 들어가는가"* 는
-어느 세션도 혼자 검증할 수 없다. 전 세션 통과 후 **전체 스위트 + 교차 시나리오 테스트**를 돌린다.
+Everyone being green individually says nothing about them working together.
+*"Does the quest reward actually land in the inventory"* cannot be verified by any single session.
+After all sessions pass, run the **full suite plus cross-feature scenario tests**.
 
-통합 실패는 **어느 한 세션의 잘못이 아니다.** 양쪽을 다 소유하는 수리 세션이 받는다.
+An integration failure is **nobody's individual fault**. It goes to a repair session that owns both sides.
 
-### 7.7 격리(worktree)는 왜 답이 아닌가
+### 7.7 Why isolation (worktrees) is not the answer
 
-세션마다 프로젝트 사본 + 전용 에디터를 주면 리스도 신호 오염도 사라진다(`unity --project-path`).
-하지만 **결합된 컨텐츠에는 안 맞는다.** 퀘스트↔인벤토리 연동은 정의상 함께 있어야 검증된다.
-격리는 *독립적인* 작업에서만 이득이고, 실제 문제는 *결합된* 작업이다. 비용도 싸지 않다(`Library/` 재임포트).
+Give each session its own project copy and dedicated editor and both the lease and the signal
+contamination disappear (`unity --project-path` supports it).
+But **it does not fit coupled content.** Quest↔inventory integration is by definition only verifiable
+together. Isolation helps *independent* work, and the actual problem is *coupled* work.
+It is not cheap either (`Library/` reimport).
 
-→ **판단: 공유 에디터 + 리스 + 귀속 + 계약 우선.** 격리는 독립 기능을 대량으로 돌릴 때의 선택지로 남긴다.
+→ **Decision: shared editor + lease + attribution + contract-first.** Isolation stays as an option
+for running many independent features at once.
 
-### 7.8 리스 경합을 줄이는 최적화
+### 7.8 Reducing lease contention
 
-검증 중 제일 잦은 건 컴파일이다. Unity 는 IDE 용 `.csproj` 를 생성하므로
-**리스 없이** 외부에서 먼저 컴파일해 볼 수 있다.
+The most frequent verification is compiling. Unity generates `.csproj` files for IDEs, so it is
+possible to compile **without the lease** first.
 
 ```
-빠른 사전 검사 (리스 X · .csproj)  →  대부분의 문법 오류를 여기서 반려
-        ↓ 통과한 것만
-권위 있는 검사 (리스 O · 에디터 recompile)
+fast pre-check (no lease · .csproj)  →  most syntax errors rejected here
+        ↓ only what passes
+authoritative check (lease · editor recompile)
 ```
 
-**[미실측]** Unity 의 컴파일은 define 심볼·asmdef·컴파일러 설정이 달라 `.csproj` 결과가
-에디터와 일치한다는 보장이 없다. **일치율을 먼저 재고**, 어긋나면 사전 검사는
-"반려"가 아니라 "힌트"로만 써야 한다.
+**[unmeasured]** Unity's compilation differs in define symbols, asmdefs, and compiler settings, so
+there is no guarantee `.csproj` results match the editor. **Measure the agreement rate first**;
+if it diverges, the pre-check may only be a *hint*, never a rejection.
 
 ---
 
-## 8. 하나의 프로젝트 — 시간이 지나도 썩지 않게
+## 8. One project — keeping it from rotting over time
 
-에디터도 프로젝트도 결국 **하나로 귀결된다.** 기능을 여럿 동시에 만들 수는 있어도
-산출물은 한 코드베이스에 쌓인다. §7 이 *공간적* 공유라면, 이 절은 *시간축* 문제다.
+The editor and the project **converge to one.** You can build many features at once, but the output
+piles up in a single codebase. If §7 is *spatial* sharing, this section is the *time* axis.
 
-### 8.1 문제 — 이유가 코드에 남지 않는다
+### 8.1 The problem — the reason never lives in the code
 
-인벤토리를 만드는 중이다. 퀘스트가 *"아이템을 갖고 있는지"* 를 물어야 하는데 그 API 가 없다.
-퀘스트 쪽이 `Inventory.HasItem()` 을 추가한다. 그다음 갈림길이 둘인데 **둘 다 나쁘다.**
+You are building inventory. Quest needs to ask *"does the player have this item"* and the API does not
+exist. The quest side adds `Inventory.HasItem()`. Then there are two roads, and **both are bad**.
 
-| | 무슨 일이 벌어지나 | 결과 |
+| | What happens | Result |
 |---|---|---|
-| **삭제** | 인벤토리 담당이 본다 → *"이거 왜 있지? 아무도 안 쓰는데"* | **퀘스트가 깨진다** |
-| **방치** | 아무도 못 건드린다 → 정체불명인 채로 남는다 | **개발할수록 쓰레기가 쌓인다** |
+| **Delete** | the inventory owner sees it → *"why is this here? nobody uses it"* | **quest breaks** |
+| **Keep** | nobody dares touch it → it stays, unexplained | **garbage accumulates as you develop** |
 
-근본 원인은 하나다 — **이 코드가 왜 있는지는 *다른 기능의 요구사항*에 있는데, 코드에는 없다.**
+There is one root cause — **why this code exists lives in *another feature's requirements*, and
+nowhere in the code.**
 
-사람 팀은 리뷰·`git blame`·*"이거 누가 쓰죠?"* 질문·부족 지식으로 메운다.
-**에이전트에게는 그게 하나도 없다.** 자기 슬라이스만 본다.
+Human teams fill that gap with review, `git blame`, a "who calls this?" message, and tribal knowledge.
+**An agent has none of that.** It only sees its own slice.
 
-### 8.2 소비자 주도 계약 — 요구를 1급 자산으로
+### 8.2 Consumer-driven contracts — make the requirement a first-class asset
 
-소유권(§3.2) 때문에 퀘스트는 인벤토리 파일을 **못 고친다.** 대신 **요청한다.**
+Ownership (§3.2) means quest **cannot** edit inventory files. So it **requests** instead.
 
 ```
 Contracts/inventory.contract.json
   { "member":       "IInventory.HasItem(ItemId) -> bool",
     "requestedBy":  "quest.reward-condition",
-    "why":          "퀘스트 조건이 아이템 보유 여부로 판정된다",
+    "why":          "a quest condition is cleared by holding an item",
     "consumerTest": "QuestTests.Condition_Clears_When_Item_Held" }
 ```
 
-- 계획 층(§2)이 이 요청을 **작업 노드**로 만든다 — *"인벤토리: 퀘스트 계약 충족"*
-- 구현은 **인벤토리 소유자**가 한다. 경계는 그대로다
-- **계약이 "누가·왜"를 기록한다.** 코드가 못 하던 일이다
+- the plan layer (§2) turns the request into a **work node** — *"inventory: satisfy the quest contract"*
+- the **inventory owner** implements it. The boundary holds
+- **the contract records who and why.** That is what the code could not do
 
-`consumerTest` 가 집행자다. 인벤토리가 그 멤버를 지우면 **퀘스트의 테스트가 깨지고**
-통합 게이트(§7.6)에서 잡힌다. 소비자 주도 계약 테스트가 하는 일 그대로다.
+`consumerTest` is the enforcer. If inventory deletes the member, **the quest test breaks** and the
+integration gate (§7.6) catches it. That is exactly what consumer-driven contract testing does.
 
-### 8.3 삭제 게이트 — 문제를 뒤집는다
+### 8.3 The deletion gate — inverting the problem
 
-계약이 있으면 *"지워도 되나?"* 가 **기계적으로 판정된다.**
+With contracts, *"is it safe to delete?"* becomes **mechanically decidable**.
 
-| 내부 사용처 | 계약 | 판정 |
+| Internal callers | Contract | Verdict |
 |---|---|---|
-| 있음 | — | 유지 |
-| 없음 | **있음** | **유지** — 남이 필요로 한다. 지우려면 계약부터 |
-| 없음 | 없음 | **고아 — 제거 대상** |
+| yes | — | keep |
+| no | **yes** | **keep** — someone else needs it. Change the contract first |
+| no | no | **orphan — safe to remove** |
 
-세 번째 줄이 핵심이다. **"쓰레기가 쌓인다"가 "자동으로 찾아 지운다"로 뒤집힌다.**
-살아 있는 코드가 계약으로 정당화되므로, 정당화되지 않은 것이 곧바로 드러난다.
+That third row is the point. **"Garbage accumulates" flips into "orphans get found and removed."**
+Because live code is justified by contracts, whatever is *not* justified stands out immediately.
 
-삭제 시도는 §5.3 의 갈래로 처리된다 — 계약에 있는 멤버를 지우려 하면 `Fail`:
+A deletion attempt is routed by §5.3 — trying to remove a member named in a contract is a `Fail`:
 
-> 이 멤버는 `quest.reward-condition` 의 계약 항목입니다. 지우려면 계약부터 바꿔야 하고,
-> 그 판단은 계획 층이 합니다.
+> This member is a contract item of `quest.reward-condition`. To remove it, change the contract first;
+> that decision belongs to the plan layer.
 
-§7.2 와 같은 규칙이다 — **계약이 틀렸다는 판단은 소비자도 소유자도 아닌 위층이 한다.**
+Same rule as §7.2 — **deciding a contract is wrong belongs neither to the consumer nor the owner,
+but to the layer above.**
 
-### 8.4 asmdef — 컴파일러가 강제하게 한다
+### 8.4 asmdef — let the compiler enforce it
 
-오케스트레이터의 경로 검사는 *우리 코드가* 지키는 규칙이다. 그런데 **Unity 는 더 강한 걸 준다.**
+The orchestrator's path checks are rules *our code* honors. But **Unity gives you something stronger.**
 
 ```
-Assets/Scripts/Contracts/   Game.Contracts.asmdef   (아무것도 참조 안 함 · leaf)
+Assets/Scripts/Contracts/   Game.Contracts.asmdef   (references nothing · leaf)
 Assets/Scripts/Inventory/   Game.Inventory.asmdef  → Contracts
 Assets/Scripts/Quest/       Game.Quest.asmdef      → Contracts, Inventory
-Assets/Editor/QuestTool/    Game.QuestTool.asmdef  → Quest  (Editor 전용)
+Assets/Editor/QuestTool/    Game.QuestTool.asmdef  → Quest  (editor only)
 ```
 
-- 참조 방향이 **컴파일러로 강제**된다. 퀘스트가 인벤토리 내부를 몰래 쓰는 게 불가능해진다
-- **순환 의존은 Unity 가 애초에 거부한다** — §2.3 의 정적 검사 하나가 공짜로 따라온다
-- 어셈블리가 쪼개지면 **부분 컴파일**이 되어 §7 의 리스 점유 시간도 줄어든다
+- reference direction is **enforced by the compiler** — quest cannot secretly reach into inventory internals
+- **Unity rejects cyclic dependencies outright** — one of §2.3's static checks comes free
+- splitting assemblies enables **partial compilation**, shortening lease hold time (§7)
 
-**[현재]** 우리는 이미 `AgentLoop.Runtime.asmdef` / `AgentLoop.Tests.asmdef` 로 이 기계를 쓴다.
-기능별 asmdef 은 그 확장일 뿐이다. **[계획]** 작업 노드가 자기 asmdef 을 갖도록 분해(§2.1)에 포함한다.
+**[now]** we already use this machinery with `AgentLoop.Runtime.asmdef` / `AgentLoop.Tests.asmdef`.
+Per-feature asmdefs are just an extension. **[planned]** have each work node carry its own asmdef in
+the decomposition (§2.1).
 
-### 8.5 표면 예산 — 비대해진 모듈은 분해 실패의 증거다
+### 8.5 Surface budget — a bloated module is evidence of a bad split
 
-구조 예산(§4.3)에 두 항목을 더한다.
+Two more entries for the structure budget (§4.3).
 
-| 지표 | 의미 |
+| Metric | Meaning |
 |---|---|
-| **고아 public 멤버 수 = 0** | 정당화되지 않은 표면이 없다 |
-| **타입당 public 표면 상한** | 넘으면 그 모듈이 너무 많은 역할을 진다 |
+| **orphan public members = 0** | no unjustified surface |
+| **public surface cap per type** | above it, that module carries too many roles |
 
-두 번째가 바깥 루프(§2.2)와 이어진다 — **인벤토리의 표면이 계속 부푼다면 분해가 틀렸다는 신호다.**
-"인벤토리"라는 노드가 사실 두세 개였던 것이다 → 세분화 트리거.
+The second connects to the outer loop (§2.2) — **if inventory's surface keeps swelling, the split was
+wrong.** "Inventory" was really two or three nodes → refinement trigger.
 
-### 8.6 출생 기록은 이미 트레이스에 있다
+### 8.6 The birth record is already in the trace
 
-*"이 멤버가 왜 여기 있나"* 는 §6 의 Span 트리가 이미 안다 —
-어느 `Work` span 이 어떤 목표로 그 파일을 건드렸는지가 기록돼 있다.
+*"Why is this member here"* is something the span tree (§6) already knows — which `Work` span touched
+that file, under which goal.
 
-계약이 **선언된** 이유라면 트레이스는 **실제** 이유다. 둘이 어긋나면 그것도 신호다.
+If the contract is the **declared** reason, the trace is the **actual** one. When they disagree, that
+too is a signal.
 
-### 8.7 미실측 / 열린 질문
+### 8.7 Unmeasured / open questions
 
-- 계약을 **누가 먼저 쓰나** — 소비자가 요청서를 내나, 계획 층이 예측해 미리 박나?
-  전자는 정확하지만 왕복이 늘고, 후자는 빠르지만 틀린 계약을 낳는다.
-- 기능별 asmdef 분할이 **컴파일 시간에 실제로 이득인지** (분할이 오히려 늘리는 경우도 있다)
-- **고아 판정의 오탐** — 리플렉션·`SendMessage`·인스펙터의 `UnityEvent`·`[MenuItem]` 은
-  정적 분석에 안 잡힌다. Unity 특유의 위험이라 **오탐률부터 재야** 삭제를 자동화할 수 있다.
+- **Who writes the contract first** — does the consumer file a request, or does the plan layer predict
+  and pin it? The former is accurate but adds round trips; the latter is fast but invents wrong contracts.
+- Whether per-feature asmdef splitting **actually helps compile time** (splitting sometimes makes it worse).
+- **False positives in orphan detection** — reflection, `SendMessage`, `UnityEvent` wired in the
+  inspector, and `[MenuItem]` are invisible to static analysis. A Unity-specific hazard, so the
+  false-positive rate must be measured before deletion can ever be automated.
 
 ---
 
-## 9. 학습 사이클 — 실행들 사이
+## 9. The learning cycle — between runs
 
 ```mermaid
 flowchart LR
-    R["실행"] --> T["트레이스"] --> S[("RunStore")]
-    S --> L["증류 · 캘리브레이션"]
-    L --> P["제안 · Proposals/"]
-    P --> B{{"벤치마크 · 홀드아웃"}}
-    B -->|"개선"| M["승인 · 적용"] --> R
-    B -->|"퇴보 · 오탐"| D["기각"]
+    R["run"] --> T["trace"] --> S[("RunStore")]
+    S --> L["distill · calibrate"]
+    L --> P["proposals · Proposals/"]
+    P --> B{{"benchmark · held-out"}}
+    B -->|"improves"| M["approve · apply"] --> R
+    B -->|"regresses · false positives"| D["reject"]
 ```
 
-**학습기는 라이브 경로에 직접 쓰지 않는다.** 제안만 낸다. 승격은 벤치마크가 결정하고 사람이 승인한다.
-자기개선 루프의 고전적 실패는 **검증기를 속이는 법을 배우는 것**이고,
-우리는 이미 그 조짐을 알기에 피드백에 못을 박아 뒀다 —
-*"assert 를 느슨하게 바꿔 통과시키지 마세요"*, *"PERF 예산을 늘려서 통과시키지 마세요"*.
-스킬이 자동 생성되면 **나쁜 스킬이 품질을 떨어뜨릴 수 있다.** 게이트가 구조적으로 필요하다.
+**Learners never write to the live path.** They only propose. Promotion is decided by the benchmark
+and approved by a human. The classic failure of a self-improvement loop is **learning to game the
+verifier**, and we already know the symptom — the feedback text pins down
+*"do not weaken the assert to make it pass"* and *"do not raise the PERF budget to pass"*.
+Once skills are generated automatically, **a bad skill can lower quality.** The gate is structural.
 
-### 9.1 Calibrator — 예산을 데이터에서
+### 9.1 Calibrator — budgets from data
 
-**[현재]** `PERF:` 블록의 예산(`maxTotalMs`)은 **모델이 스스로 제안한다.** 자기 시험을 자기가 채점한다.
-사람이 정한 값도 손으로 데어 가며 맞췄다 — 12ms 로 잡았다 플래키해서 25ms, 드로우콜 30 → 120.
+**[now]** the `maxTotalMs` in the `PERF` block is **proposed by the model itself.** Grading its own exam.
+And the human-chosen numbers were tuned by getting burned — 12ms was flaky so it became 25ms;
+draw calls went from 30 to 120.
 
-**[계획]** 측정 분포를 쌓아 `p95 × 마진`으로 예산을 뽑고, 모델 제안값을 **검증·교정**한다.
-작고 명확하며, 이미 두 번 겪은 고통을 없앤다. 첫 자기개선으로 적합하다.
+**[planned]** accumulate the measurement distribution, derive a budget as `p95 × margin`, and use it to
+**validate and correct** the model's proposal. Small, clear, and it removes a pain felt twice already.
+A good first act of self-improvement.
 
-### 9.2 Distiller — 실패에서 스킬로
+### 9.2 Distiller — from failures into skills
 
-**[현재]** `Skills/*.md` 는 사람이 쓴다. 그런데 스킬 작성 원칙은 이랬다 —
-*"이론상 나쁜 것이 아니라 **모델이 실제로 하는 실수**를 겨냥하고, 기존 산출물로 오탐부터 확인."*
-**실행 기록 마이닝이 그 원칙의 자동화판이다.**
+**[now]** `Skills/*.md` are written by hand. But the rule for authoring them was already this:
+*target **mistakes models actually make**, not things that are bad in theory, and measure the
+false-positive rate against existing output first.*
+**Mining the run records is the automated form of that rule.**
 
-같은 실패 시그니처가 N회 반복 → `GUIDANCE` 한 줄 + `CHECK` 정규식을 제안한다.
-`CHECK` 절반은 **검증 가능**하다는 게 핵심 — 과거 산출물 전체에 돌려 오탐률을 재고, 통과해야 채택.
-지식이 마크다운이라 git diff 로 보이고, 사람이 거부할 수 있다.
+The same failure signature recurring N times proposes one `GUIDANCE` line plus one `CHECK` regex.
+The key is that half of it — the `CHECK` — is **verifiable**: run it across all past output, measure
+the false-positive rate, and adopt only if it passes. The knowledge is markdown, so it shows up in a
+git diff and a human can say no.
 
-### 9.3 Policy — 라우팅
+### 9.3 Policy — routing
 
-백엔드·모델·`--tests-only`·히스토리 윈도우는 **[현재]** 고정 플래그다.
-`(목표 부류, 설정) → 수렴 스텝 수`를 쌓으면 라우팅을 학습할 수 있다.
-best-of-N(§5.4)과 붙으면 밴딧 문제가 된다 — 이겨 온 백엔드에 생성 예산을 더 준다.
+Backend, model, `--tests-only`, and the history window are **[now]** fixed flags.
+Accumulate `(goal class, config) → steps to convergence` and routing becomes learnable.
+Combined with best-of-N (§5.4) it turns into a bandit problem — give more generation budget to the
+backend that has been winning.
 
-### 9.4 범위 밖 — 가중치 학습
+### 9.4 Out of scope — weight training
 
-백엔드가 우리가 못 건드리는 CLI 에이전트라 파인튜닝은 범위 밖이다.
-다만 **부산물은 남는다**: `(프롬프트, 생성물, 검증 판정)` 은 정확히 검증가능보상(RLVR) 학습 데이터의 모양이다.
-훈련하지 않아도 *"이 루프의 부산물은 검증된 학습 데이터셋"* 은 참이다.
+The backends are CLI agents we do not control, so fine-tuning is out of scope.
+But **the byproduct remains**: `(prompt, generation, verdict)` is exactly the shape of
+reinforcement-learning-from-verifiable-rewards data. Even without training,
+*"this loop's byproduct is a verified training dataset"* is true.
 
 ---
 
-## 10. 벤치마크 — 없으면 개선을 주장할 수 없다
+## 10. Benchmark — without it you cannot claim improvement
 
-이 프로젝트의 정체성은 **"측정으로 답한다"** 이다.
-자기개선은 자기기만이 특히 쉬운 영역이라(학습에 쓴 목표에서만 잘하게 되는 것),
-**"똑똑해졌다"를 느낌으로 주장하는 순간 그동안 쌓은 신뢰가 무너진다.**
+This project's identity is **"answer by measuring."**
+Self-improvement is unusually easy to fool yourself about (getting better only at the goals you
+trained on), so **the moment "it got smarter" is asserted on vibes, the credibility built so far is gone.**
 
 ```
 Benchmark/goals.jsonl   # {id, goal, target, tags, holdout}
 ```
 
-- 목표 15~20개, **학습용 / 홀드아웃 분리**
-- 지표: `성공률 · 평균 스텝 수 · 벽시계`
-- 베이스라인을 먼저 기록하고, 이후 모든 개선은 **홀드아웃 대비**로만 말한다
+- 15–20 goals, **split into training and held-out**
+- Metrics: `success rate · mean steps · wall clock`
+- Record a baseline first; every later improvement is stated **against the held-out set only**
 
-목표하는 문장의 모양:
+The shape of the sentence to aim for:
 
-> 홀드아웃 20목표: 평균 3.4스텝 → 스킬 증류 후 **1.9스텝**, 성공률 70% → 90%
+> Held-out, 20 goals: 3.4 steps on average → **1.9 steps** after skill distillation; success rate 70% → 90%
 
-벤치마크는 §2 의 바깥 루프에도 필요하다 — **"Agent 분해 vs 사람 분해"** 를 비교해야
-바깥 루프가 실제로 이득인지 말할 수 있다.
-
----
-
-## 11. 구축 순서
-
-| | 단계 | 왜 이 순서인가 |
-|---|---|---|
-| 0 | **RunStore + Span 트레이스** | 지금 매일 버리고 있는 재료를 줍는 것. 모든 후속 단계의 전제 |
-| 0 | **벤치마크 + 베이스라인** | 이게 없으면 이후 어떤 개선도 측정 불가 |
-| 1 | **노드 추출** | 회귀 기준: 데모 5종이 **같은 판정**을 내야 함 |
-| 2 | **그래프 선언 · 정책** | 타깃이 자기 서브그래프를 선언, `Supports` 분기 흡수 |
-| 3 | **RED 게이트 + TDD 사이클** (§4) | 헛테스트 차단. 노드 계약 위에 바로 얹힘 |
-| 4 | **트레이스 시각화** | 층 트리를 그림으로 — 포폴 회수 지점 |
-| 5 | **작업 분해 + 바깥 루프** (§2) | 트레이스 신호가 있어야 분해를 판정할 수 있다 → 0·4 이후 |
-| 6 | **Calibrator** (§9.1) | 첫 자기개선. 작고 명확 |
-| 7 | **best-of-N** (§5.4) | 그래프여야만 가능한 구조 |
-| 8 | **Distiller** (§9.2) | 본편 |
-
-0단계 둘은 **그래프 없이도 지금 된다.** 오히려 먼저 해야 트레이스가 *무엇을 기록해야 하는지* 정해진다.
-
-**직교하는 것들** — 이 순서에 매이지 않고 필요한 시점에 끼워 넣는다.
-
-| | 언제 필요해지나 | 전제 |
-|---|---|---|
-| **멀티세션** (§7) | 결합된 컨텐츠를 병렬로 돌려야 할 때 | 1~2단계의 노드 계약 |
-| **계약 · 삭제 게이트** (§8) | **기능이 둘 이상 되는 순간부터** | 소유권(§3.2) |
-
-§8 은 특히 미루면 비싸진다. 계약 없이 쌓인 코드는 나중에 소급해서 *"이게 왜 있지"* 를
-복원해야 하는데, 그때는 이미 이유가 사라진 뒤다.
+The benchmark is also required by the outer loop (§2) — you need to compare
+**agent decomposition vs. human decomposition** before claiming the outer loop pays off.
 
 ---
 
-## 12. 기존 설계 결정과의 정합
+## 11. Build order
 
-[핵심 설계 결정](../CLAUDE.md)을 바꾸지 않는다. 오히려 강화한다.
+| | Step | Why here |
+|---|---|---|
+| 0 | **RunStore + span trace** | picking up material currently thrown away daily. Prerequisite for everything after |
+| 0 | **Benchmark + baseline** | without it, no later improvement is measurable |
+| 1 | **Extract nodes** | regression bar: the five demos must reach the **same verdicts** |
+| 2 | **Declared graph + policy** | targets declare their own subgraph; absorbs the scattered `Supports` branching |
+| 3 | **RED gate + TDD cycle** (§4) | blocks vacuous tests. Sits directly on the node contract |
+| 4 | **Trace visualization** | the layer tree as a picture — where the portfolio value is realized |
+| 5 | **Decomposition + outer loop** (§2) | judging a plan requires trace signals → after 0 and 4 |
+| 6 | **Calibrator** (§9.1) | first act of self-improvement. Small and clear |
+| 7 | **best-of-N** (§5.4) | a shape only the graph makes possible |
+| 8 | **Distiller** (§9.2) | the main event |
 
-| 결정 | 이 아키텍처에서 |
+The two step-0 items **work without the graph and can be done today.** In fact doing them first is
+what determines *what the trace needs to record*.
+
+**Orthogonal concerns** — not tied to this order; slot them in when needed.
+
+| | When it becomes necessary | Prerequisite |
+|---|---|---|
+| **Multi-session** (§7) | when coupled content must be built in parallel | the node contract from steps 1–2 |
+| **Contracts + deletion gate** (§8) | **the moment there is more than one feature** | ownership (§3.2) |
+
+§8 gets expensive if deferred. Code accumulated without contracts has to be reverse-engineered later
+to answer *"why is this here"* — and by then the reason is gone.
+
+---
+
+## 12. Consistency with the existing decisions
+
+The [core design decisions](../CLAUDE.md) are not changed. They are reinforced.
+
+| Decision | In this architecture |
 |---|---|
-| **D1. 루프는 우리 것** | 흐름 제어가 노드 밖 실행기에 **더 명시적으로** 모인다. 백엔드는 여전히 도구 없는 텍스트 생성기 |
-| **D2. 두 축 pluggable** | 타깃이 서브그래프를, 백엔드가 팬아웃 후보를 제공한다 |
-| **D3. C# 단일** | 그대로 |
-| **D4. 검증이 1급 시민** | 검증이 **일급 노드**가 되고, 판정 기준(테스트·예산·계획) 자체가 검증·학습 대상이 된다 |
+| **D1. We own the loop** | flow control gathers **even more explicitly** in the executor outside the nodes. Backends remain toolless text generators |
+| **D2. Two pluggable axes** | targets supply subgraphs; backends supply fan-out candidates |
+| **D3. C# only** | unchanged |
+| **D4. Verification is a first-class citizen** | verification becomes a **first-class node**, and the criteria themselves (tests, budgets, plans) become subject to verification and learning |
 
 ---
 
-## 13. 미실측 총람
+## 13. The unmeasured list
 
-주장하기 전에 재야 하는 것들. 이 목록이 다음 실험 계획이다.
+Things to measure before claiming. This list is the experiment plan.
 
-| # | 무엇을 | 왜 필요한가 | 절 |
+| # | What | Why it matters | § |
 |---|---|---|---|
-| 1 | pipeline 서버의 동시 요청 처리(큐잉? 거부? 경합?) | **리스 설계의 전제.** 이미 큐잉한다면 절반은 불필요 | §7.4 |
-| 2 | 도메인 리로드 중 들어온 명령의 실제 실패 모양 | `Fatal` 판정 기준 | §5.5 |
-| 3 | `.csproj` 컴파일과 에디터 컴파일의 에러 일치율 | 사전 검사를 "반려"로 쓸 수 있는지 | §7.8 |
-| 4 | EditMode ↔ PlayMode 사이클 시간 차이 | RED 게이트 비용의 실제 크기 | §4.5 |
-| 5 | 구조 지표와 "좋은 코드"의 상관 · 오탐률 | 구조 예산을 채택할지 | §4.3 |
-| 6 | Agent 분해 vs 사람 분해 | 바깥 루프가 실제로 이득인지 | §2, §10 |
-| 7 | 단조 세분화의 실측 수렴 스텝 수 | 이론상 유한이지만 실제 비용은 모른다 | §2.4 |
-| 8 | **고아 판정의 오탐률** | 리플렉션·`SendMessage`·`UnityEvent`·`[MenuItem]` 이 안 잡힌다. **삭제 자동화의 전제** | §8.7 |
-| 9 | 기능별 asmdef 분할의 컴파일 시간 효과 | 분할이 오히려 늘리는 경우도 있다 | §8.4 |
+| 1 | how the pipeline server handles concurrent requests (queue? reject? race?) | **premise of the lease design.** If it already queues, half of it is unnecessary | §7.4 |
+| 2 | the actual failure shape of a command sent during a domain reload | the criterion for `Fatal` | §5.5 |
+| 3 | agreement rate between `.csproj` and editor compilation | whether the pre-check can *reject* or only *hint* | §7.8 |
+| 4 | EditMode vs. PlayMode cycle time | the real cost of the RED gate | §4.5 |
+| 5 | correlation between structure metrics and "good code" · false-positive rate | whether to adopt the structure budget | §4.3 |
+| 6 | agent decomposition vs. human decomposition | whether the outer loop actually pays off | §2, §10 |
+| 7 | measured convergence steps for monotone refinement | finite in theory; the real cost is unknown | §2.4 |
+| 8 | **false-positive rate of orphan detection** | reflection, `SendMessage`, `UnityEvent`, `[MenuItem]` are invisible. **Prerequisite for automating deletion** | §8.7 |
+| 9 | compile-time effect of per-feature asmdef splitting | splitting sometimes makes it worse | §8.4 |

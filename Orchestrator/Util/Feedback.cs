@@ -25,7 +25,7 @@ public static class Feedback
             sb.AppendLine("  - " + Clip(item, MaxItemChars));
 
         if (items.Count > MaxItems)
-            sb.AppendLine($"  … 그 외 {items.Count - MaxItems}건 생략(같은 유형부터 먼저 고치세요)");
+            sb.AppendLine($"  … and {items.Count - MaxItems} more (fix these categories first)");
 
         return sb.ToString().TrimEnd();
     }
@@ -33,7 +33,7 @@ public static class Feedback
     public static string Clip(string s, int max)
     {
         s = s.Replace("\r", " ").Replace("\n", " ").Trim();
-        return s.Length <= max ? s : s[..max] + " …(생략)";
+        return s.Length <= max ? s : s[..max] + " …(truncated)";
     }
 
     /// <summary>대략적인 맥락 크기(문자 수) — 절약 효과를 로그로 보이기 위한 지표.</summary>

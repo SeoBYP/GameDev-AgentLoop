@@ -73,7 +73,7 @@ public sealed class ApiBackend : IAgentBackend, IDisposable
         if (root.TryGetProperty("stop_reason", out var stop) &&
             stop.GetString() == "refusal")
         {
-            throw new InvalidOperationException("Anthropic API가 요청을 거부(refusal)했습니다.");
+            throw new InvalidOperationException("The Anthropic API refused the request.");
         }
 
         var sb = new StringBuilder();

@@ -14,7 +14,7 @@ public static class PromptText
         var sb = new StringBuilder();
         sb.AppendLine(context.System);
         sb.AppendLine();
-        sb.AppendLine("아래는 지금까지의 대화 맥락이다. 이어서 다음 어시스턴트 응답을 위 출력 계약대로 내라. 도구를 쓰지 말고 텍스트로만.");
+        sb.AppendLine("Below is the conversation so far. Produce the next assistant response following the output contract above. Do not use tools — text only.");
         sb.AppendLine();
         foreach (var turn in context.History)
         {

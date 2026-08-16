@@ -27,7 +27,7 @@ public sealed record ProjectLayout(
     public const string ConfigRelPath = ".agentloop/layout.json";
 
     private static readonly ProjectLayout Conventional =
-        new("Assets/Scripts", "Assets/Tests/PlayMode", null, null, "관례 기본값");
+        new("Assets/Scripts", "Assets/Tests/PlayMode", null, null, "convention");
 
     /// <summary>설정 → 탐지 → 기본값 순으로 해석한다.</summary>
     public static ProjectLayout Resolve(string projectRoot)
@@ -53,7 +53,7 @@ public sealed record ProjectLayout(
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"경고: {ConfigRelPath} 를 읽지 못했습니다 — {ex.Message}. 자동 탐지로 넘어갑니다.");
+            Console.Error.WriteLine($"warning: could not read {ConfigRelPath} — {ex.Message}. Falling back to detection.");
             return null;
         }
 
@@ -99,7 +99,7 @@ public sealed record ProjectLayout(
             test?.Dir    ?? Conventional.TestDir,
             runtime?.Name,
             test?.Name,
-            "asmdef 탐지");
+            "asmdef scan");
     }
 
     private sealed record AsmdefInfo(string Name, string Dir, IReadOnlyList<string> References, bool IsTest, bool IsEditorOnly)
@@ -140,7 +140,7 @@ public sealed record ProjectLayout(
     }
 
     public string Describe()
-        => $"스크립트 {ScriptDir}/ · 테스트 {TestDir}/ " +
-           $"· 런타임 어셈블리 {RuntimeAssembly ?? "Assembly-CSharp"} " +
-           $"· 테스트 어셈블리 {TestAssembly ?? "(없음)"}  [{Source}]";
+        => $"scripts {ScriptDir}/ · tests {TestDir}/ " +
+           $"· runtime asm {RuntimeAssembly ?? "Assembly-CSharp"} " +
+           $"· test asm {TestAssembly ?? "(none)"}  [{Source}]";
 }

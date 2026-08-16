@@ -14,12 +14,12 @@ public static class ProjectInit
 {
     public static int Run(string projectRoot, ProjectLayout layout)
     {
-        Console.WriteLine($"프로젝트: {projectRoot}");
-        Console.WriteLine($"현재 배치: {layout.Describe()}");
+        Console.WriteLine($"Project: {projectRoot}");
+        Console.WriteLine($"Current layout: {layout.Describe()}");
 
         if (layout.TestsReady)
         {
-            Console.WriteLine("\n✅ 이미 테스트 어셈블리가 있습니다 — 할 일이 없습니다.");
+            Console.WriteLine("\n✅ A test assembly already exists — nothing to do.");
             return 0;
         }
 
@@ -49,21 +49,22 @@ public static class ProjectInit
 
         if (created.Count == 0)
         {
-            Console.WriteLine("\n변경 없음 — 대상 파일이 이미 존재합니다.");
+            Console.WriteLine("\nNo changes — the target files already exist.");
             return 0;
         }
 
-        Console.WriteLine("\n생성:");
+        Console.WriteLine("\nCreated:");
         foreach (var f in created)
             Console.WriteLine($"  + {Path.GetRelativePath(projectRoot, f).Replace('\\', '/')}");
 
         Console.WriteLine("""
 
-            다음:
-              1) Unity 에디터에서 프로젝트를 열어(또는 포커스를 줘서) 컴파일이 끝나기를 기다리세요.
-                 새 asmdef 은 기존 스크립트를 다른 어셈블리로 옮기므로, 참조가 깨지면 그 부분을 고쳐야 합니다.
-              2) `unity pipeline list` 로 '서버 연결 가능: true' 를 확인하세요.
-              3) 다시 실행하면 테스트 러너로 검증합니다.
+            Next:
+              1) Open (or focus) the project in the Unity Editor and let it finish compiling.
+                 New .asmdef files move existing scripts into a different assembly, so fix any
+                 references that break.
+              2) Confirm a reachable server with: unity pipeline list
+              3) Run agentloop again — it will now verify through the Test Runner.
             """);
         return 0;
     }
@@ -73,7 +74,7 @@ public static class ProjectInit
         written = path;
         if (File.Exists(path))
         {
-            Console.WriteLine($"  · 건너뜀(이미 있음): {path}");
+            Console.WriteLine($"  · skipped (already exists): {path}");
             return false;
         }
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

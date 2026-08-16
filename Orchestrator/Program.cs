@@ -29,7 +29,7 @@ var projectPath = opts.ProjectPath
 
 if (projectPath is null || !Directory.Exists(Path.Combine(projectPath, "Assets")))
 {
-    Console.Error.WriteLine("Unity 프로젝트 루트를 찾지 못했습니다(Assets/ 없음). --project <경로> 로 지정하세요.");
+    Console.Error.WriteLine("No Unity project root found (no Assets/ folder). Pass --project <path>.");
     return 2;
 }
 
@@ -38,7 +38,7 @@ if (projectPath is null || !Directory.Exists(Path.Combine(projectPath, "Assets")
 var envFile = opts.EnvFile ?? Path.Combine(projectPath, ".env");
 var loadedKeys = DotEnv.Load(envFile);
 if (loadedKeys.Count > 0)
-    Console.WriteLine($".env 적용: {string.Join(", ", loadedKeys)}");   // 키 이름만 — 값은 절대 출력하지 않는다
+    Console.WriteLine($".env loaded: {string.Join(", ", loadedKeys)}");   // 키 이름만 — 값은 절대 출력하지 않는다
 
 // 1-a2) 대상 프로젝트의 배치 해석 — 경로·어셈블리는 프로젝트마다 다르다.
 var layout = ProjectLayout.Resolve(projectPath);
@@ -55,15 +55,15 @@ var selectedSkills = library.Select(opts.Goal, opts.Target);
 
 if (opts.ListSkills)
 {
-    Console.WriteLine($"스킬 디렉터리: {skillsDir}");
+    Console.WriteLine($"Skills directory: {skillsDir}");
     if (library.All.Count == 0)
     {
-        Console.WriteLine("  (스킬 없음)");
+        Console.WriteLine("  (no skills found)");
     }
     foreach (var s in library.All)
     {
         var mark = selectedSkills.Contains(s) ? "✓" : " ";
-        Console.WriteLine($"  [{mark}] {s.Name} — {s.Title}  (검사 {s.Checks.Count}개)");
+        Console.WriteLine($"  [{mark}] {s.Name} — {s.Title}  ({s.Checks.Count} checks)");
         foreach (var c in s.Checks)
             Console.WriteLine($"        · {c.Id}  [{string.Join(", ", c.Scopes)}]");
     }
@@ -84,9 +84,9 @@ if (opts.Target.Equals("ugs", StringComparison.OrdinalIgnoreCase))
 else
 {
     var unityExe = UnityEditorTarget.ResolveUnityExe();
-    Console.WriteLine($"프로젝트 배치: {layout.Describe()}");
+    Console.WriteLine($"Project layout: {layout.Describe()}");
     if (!layout.TestsReady)
-        Console.WriteLine("  ⚠ 테스트 어셈블리가 없어 테스트 검증을 건너뜁니다 — `--init` 으로 만들 수 있습니다.");
+        Console.WriteLine("  ⚠ No test assembly — test verification is skipped. Run `agentloop --init` to enable it.");
 
     target = new UnityEditorTarget(
         unityExe, projectPath,
@@ -98,8 +98,8 @@ else
 // 1-d) 조립된 시스템 프롬프트만 보고 끝내기(디버깅/설명용) — 인증 없이도 타깃별 규격을 확인할 수 있다.
 if (opts.PrintPrompt)
 {
-    Console.WriteLine($"# 타깃: {target.Name}   런타임 검증 지원: {target.Supports(VerifyKind.RuntimeAssert)}");
-    Console.WriteLine($"# 스킬: {(selectedSkills.Count == 0 ? "없음" : string.Join(", ", selectedSkills.Select(s => s.Name)))}");
+    Console.WriteLine($"# target: {target.Name}   runtime verification: {target.Supports(VerifyKind.RuntimeAssert)}");
+    Console.WriteLine($"# skills: {(selectedSkills.Count == 0 ? "none" : string.Join(", ", selectedSkills.Select(s => s.Name)))}");
     Console.WriteLine(new string('─', 70));
     Console.WriteLine(AgentLoop.BuildSystemPrompt(target, selectedSkills));
     return 0;
@@ -144,13 +144,13 @@ else
     {
         Console.Error.WriteLine(
             """
-            백엔드(두뇌)를 고르세요:
-              • 이 AI(Claude Code)로:    orchestrator --claude "목표"   ← claude CLI 로그인 필요
-              • Codex 로:                orchestrator --codex  "목표"   ← codex  CLI 로그인 필요
-              • Anthropic API 키로:      환경변수 ANTHROPIC_API_KEY 설정 후  orchestrator "목표"
-              • 키 없이 루프 배관 증명:  orchestrator --demo        (컴파일 자가수리)
-              • 키 없이 런타임 검증 증명: orchestrator --demo-play   (컴파일은 통과하나 동작이 틀린 코드)
-            (키는 절대 레포에 커밋하지 마세요 — CLAUDE.md)
+            Pick a backend (the brain):
+              • Claude Code CLI:   agentloop --claude "<goal>"     (needs `claude` login, no API key)
+              • Codex CLI:         agentloop --codex  "<goal>"     (needs `codex` login, no API key)
+              • Anthropic API:     set ANTHROPIC_API_KEY, then  agentloop "<goal>"
+              • No key at all:     agentloop --demo        (compile self-repair)
+                                   agentloop --demo-play   (compiles, but behaves wrong)
+            Never commit API keys to the repository.
             """);
         return 2;
     }
@@ -187,18 +187,18 @@ try
 {
     var result = await loop.RunAsync(opts.Goal, cts.Token);
     Console.WriteLine();
-    Console.WriteLine(result.Success ? $"✅ 성공 — {result.Summary}" : $"❌ 실패 — {result.Summary}");
+    Console.WriteLine(result.Success ? $"✅ SUCCESS — {result.Summary}" : $"❌ FAILED — {result.Summary}");
     return result.Success ? 0 : 1;
 }
 catch (OperationCanceledException)
 {
-    Console.Error.WriteLine("사용자에 의해 취소됨.");
+    Console.Error.WriteLine("Cancelled by user.");
     return 130;
 }
 catch (Exception ex)
 {
     // 백엔드/타깃 실패(예: claude 로그인 만료, unity 서버 미연결)를 깔끔히 보고.
-    Console.Error.WriteLine($"\n❌ 오류 — {ex.Message}");
+    Console.Error.WriteLine($"\n❌ ERROR — {ex.Message}");
     return 1;
 }
 finally
@@ -256,13 +256,13 @@ static Options ParseArgs(string[] args)
     {
         // 데모는 목표를 무시하고 스크립트를 재생하므로, 로그가 산출물과 맞도록 기본 목표를 맞춰 준다.
         if (o.DemoPlay)
-            o.Goal = "스태미나 컴포넌트를 만들어줘. Use(int)/Recover(int) 를 갖고, 값은 0~Max 를 벗어나지 않는다.";
+            o.Goal = "A stamina component with Use(int)/Recover(int) that never leaves the 0..Max range.";
         else if (o.DemoSkills)
-            o.Goal = "대상을 따라가는 Follower 컴포넌트를 만들어줘. 속도와 대상은 인스펙터에서 설정한다.";
+            o.Goal = "A Follower component that chases a target; speed and target are set in the inspector.";
         else if (o.DemoPerf)
-            o.Goal = "점수를 기록하는 ScoreTracker 컴포넌트를 만들어줘. Record(int) 는 매 프레임 불릴 수 있다.";
+            o.Goal = "A ScoreTracker component; Record(int) may be called every frame.";
         else if (o.DemoDraw)
-            o.Goal = "격자 타일을 스폰하는 TileField 컴포넌트를 만들어줘. Build() 로 바닥 타일을 깐다.";
+            o.Goal = "A TileField component that spawns a grid of floor tiles via Build().";
     }
     return o;
 }
@@ -389,7 +389,7 @@ static class HelpText
 sealed class Options
 {
     public string Goal { get; set; } =
-        "간단한 Health(HP) 컴포넌트를 만들어줘. 현재/최대 체력, TakeDamage(int), Heal(int)을 갖고, 체력은 0 미만·최대치 초과가 되지 않아야 한다.";
+        "A simple Health component with current/max HP, TakeDamage(int) and Heal(int); HP must never go below 0 or above max.";
     public int MaxSteps { get; set; } = 6;
     public bool Demo { get; set; }
     public bool DemoPlay { get; set; }
@@ -505,8 +505,8 @@ static class DemoScript
         s.Recover(9999);
         int afterRecover = s.Current;
         UnityEngine.Object.DestroyImmediate(go);
-        if (afterUse != 0) return "Use(500) 후 Current 는 0 이어야 하는데 " + afterUse + " 였습니다.";
-        if (afterRecover != 100) return "Recover(9999) 후 Current 는 Max(100) 이어야 하는데 " + afterRecover + " 였습니다.";
+        if (afterUse != 0) return "After Use(500), Current should be 0 but was " + afterUse + ".";
+        if (afterRecover != 100) return "After Recover(9999), Current should be Max(100) but was " + afterRecover + ".";
         return "OK";
         ```
         """,
@@ -539,8 +539,8 @@ static class DemoScript
         s.Recover(9999);
         int afterRecover = s.Current;
         UnityEngine.Object.DestroyImmediate(go);
-        if (afterUse != 0) return "Use(500) 후 Current 는 0 이어야 하는데 " + afterUse + " 였습니다.";
-        if (afterRecover != 100) return "Recover(9999) 후 Current 는 Max(100) 이어야 하는데 " + afterRecover + " 였습니다.";
+        if (afterUse != 0) return "After Use(500), Current should be 0 but was " + afterUse + ".";
+        if (afterRecover != 100) return "After Recover(9999), Current should be Max(100) but was " + afterRecover + ".";
         return "OK";
         ```
         """,
@@ -612,7 +612,7 @@ static class DemoScript
         var f = go.AddComponent<Follower>();
         bool has = f.HasTarget;
         UnityEngine.Object.DestroyImmediate(go);
-        return has ? "target 이 없는데 HasTarget 이 true 입니다." : "OK";
+        return has ? "HasTarget is true even though no target is set." : "OK";
         ```
         """,
     };
@@ -660,7 +660,7 @@ static class DemoScript
         f.Build();
         int n = f.SpawnedCount;
         UnityEngine.Object.DestroyImmediate(go);
-        return n == 64 ? "OK" : ("타일이 64개여야 하는데 " + n + " 개였습니다.");
+        return n == 64 ? "OK" : ("Expected 64 tiles but found " + n + ".");
         ```
         PERF:
         ```json
@@ -706,7 +706,7 @@ static class DemoScript
         f.Build();
         int n = f.SpawnedCount;
         UnityEngine.Object.DestroyImmediate(go);
-        return n == 16 ? "OK" : ("타일이 16개여야 하는데 " + n + " 개였습니다.");
+        return n == 16 ? "OK" : ("Expected 16 tiles but found " + n + ".");
         ```
         PERF:
         ```json
@@ -761,7 +761,7 @@ static class DemoScript
         t.Record(10);
         int total = t.Total;
         UnityEngine.Object.DestroyImmediate(go);
-        return total == 280 ? "OK" : ("Record(10) 후 Total 은 280 이어야 하는데 " + total + " 였습니다.");
+        return total == 280 ? "OK" : ("After Record(10), Total should be 280 but was " + total + ".");
         ```
         PERF:
         ```json
@@ -809,7 +809,7 @@ static class DemoScript
         t.Record(10);
         int total = t.Total;
         UnityEngine.Object.DestroyImmediate(go);
-        return total == 280 ? "OK" : ("Record(10) 후 Total 은 280 이어야 하는데 " + total + " 였습니다.");
+        return total == 280 ? "OK" : ("After Record(10), Total should be 280 but was " + total + ".");
         ```
         PERF:
         ```json

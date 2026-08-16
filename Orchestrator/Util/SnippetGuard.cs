@@ -20,13 +20,13 @@ public static partial class SnippetGuard
 
     private static readonly Rule[] Rules =
     {
-        new(FileMutationRegex(),  "파일 시스템 변경(삭제·쓰기·이동)"),
-        new(DirectoryRegex(),     "디렉터리 조작"),
-        new(ProcessRegex(),       "외부 프로세스 실행"),
-        new(NetworkRegex(),       "네트워크 접근"),
-        new(RegistryRegex(),      "레지스트리 접근"),
-        new(AssetMutationRegex(), "에셋 삭제·이동(프로젝트 손상 위험)"),
-        new(QuitRegex(),          "에디터/애플리케이션 종료"),
+        new(FileMutationRegex(),  "file system mutation (delete/write/move)"),
+        new(DirectoryRegex(),     "directory manipulation"),
+        new(ProcessRegex(),       "launching an external process"),
+        new(NetworkRegex(),       "network access"),
+        new(RegistryRegex(),      "registry access"),
+        new(AssetMutationRegex(), "asset deletion/move (can corrupt the project)"),
+        new(QuitRegex(),          "quitting the editor/application"),
     };
 
     // 파일 변경: 읽기(ReadAllText 등)는 허용, 변경 계열만 막는다.
@@ -70,14 +70,14 @@ public static partial class SnippetGuard
     {
         var list = string.Join("\n", violations.Select(v => "  - " + v));
         return $"""
-            검증 스니펫이 **허용되지 않는 동작**을 포함해 실행하지 않았습니다:
+            The verification snippet was NOT executed because it contains disallowed operations:
 
             {list}
 
-            검증 코드는 컴포넌트의 동작만 확인해야 합니다.
-            파일·프로세스·네트워크·레지스트리·에셋 삭제에 접근하지 말고,
-            `new UnityEngine.GameObject()` + `AddComponent<T>()` 로 만든 객체만 조작한 뒤
-            `UnityEngine.Object.DestroyImmediate(go)` 로 정리하세요.
+            Verification code must only exercise the component's behavior.
+            Do not touch the file system, processes, the network, the registry, or delete assets.
+            Build objects with `new UnityEngine.GameObject()` + `AddComponent<T>()`, operate only on
+            those, and clean up with `UnityEngine.Object.DestroyImmediate(go)`.
             """;
     }
 }

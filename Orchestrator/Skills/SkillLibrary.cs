@@ -69,7 +69,7 @@ public sealed class SkillLibrary
             return string.Empty;
 
         var sb = new StringBuilder();
-        sb.AppendLine("DOMAIN RULES (반드시 지킬 것 — 위반 시 정적 검사에서 자동 반려됩니다):");
+        sb.AppendLine("DOMAIN RULES (mandatory — violations are rejected by a static check before anything is applied):");
         foreach (var s in skills)
         {
             sb.AppendLine();
@@ -120,12 +120,12 @@ public sealed class SkillLibrary
 
             if (check.ForbidEmptyBody && CSharpSource.IsEffectivelyEmpty(body))
             {
-                yield return $"{check.Message} (문제 메서드: {method})";
+                yield return $"{check.Message} (in method: {method})";
                 continue;
             }
 
             if (check.ForbidPattern is not null && Regex.IsMatch(body, check.ForbidPattern))
-                yield return $"{check.Message} (문제 메서드: {method})";
+                yield return $"{check.Message} (in method: {method})";
         }
     }
 

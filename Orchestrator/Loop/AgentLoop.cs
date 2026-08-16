@@ -41,11 +41,11 @@ public sealed class AgentLoop
 
     public async Task<LoopResult> RunAsync(string goal, CancellationToken ct)
     {
-        _log($"목표: {goal}");
-        _log($"백엔드: {_backend.Name}   타깃: {_target.Name}   maxSteps: {_options.MaxSteps}");
+        _log($"Goal: {goal}");
+        _log($"Backend: {_backend.Name}   Target: {_target.Name}   max steps: {_options.MaxSteps}");
         _log(_skills.Count > 0
-            ? $"스킬: {string.Join(", ", _skills.Select(s => s.Name))} ({_skills.Sum(s => s.Checks.Count)}개 검사)"
-            : "스킬: 없음 (--skills off)");
+            ? $"Skills: {string.Join(", ", _skills.Select(s => s.Name))} ({_skills.Sum(s => s.Checks.Count)} checks)"
+            : "Skills: none (--skills off)");
 
         var system = BuildSystemPrompt(_target, _skills);
         var history = new List<Turn> { new(Role.User, BuildInitialPrompt(goal)) };
@@ -60,15 +60,15 @@ public sealed class AgentLoop
 
             // ① 생성 — 오래된 시도는 잘라 보낸다(계약이 "매번 전체 파일"이라 최신 것만 있으면 충분).
             var sent = Trim(history);
-            _log($"  (맥락 {Feedback.ApproxChars(system, sent.Select(t => t.Content)):N0}자 / 턴 {sent.Count}개)");
+            _log($"  (context {Feedback.ApproxChars(system, sent.Select(t => t.Content)):N0} chars / {sent.Count} turns)");
 
             var reply = await _backend.CompleteAsync(new AgentContext(system, sent), ct);
             history.Add(new Turn(Role.Assistant, reply.Text));
-            _log($"① 생성  → 파일 편집 {reply.Edits.Count}개");
+            _log($"① generate → {reply.Edits.Count} file edit(s)");
 
             if (reply.Edits.Count == 0)
             {
-                _log("   (파싱된 FILE 블록 없음 — 형식 재요청)");
+                _log("   (no FILE block parsed — asking again for the format)");
                 history.Add(new Turn(Role.User, NoEditsFeedback));
                 continue;
             }
@@ -80,7 +80,7 @@ public sealed class AgentLoop
                 var violations = SkillLibrary.Inspect(_skills, reply.Edits);
                 if (violations.Count > 0)
                 {
-                    _log($"①-b 검사 → 스킬 위반 {violations.Count}건 ❌ (적용하지 않음)");
+                    _log($"①-b check  → {violations.Count} skill violation(s) ❌ (not applied)");
                     foreach (var v in violations.Take(5))
                         _log($"      · {v}");
 
@@ -88,15 +88,16 @@ public sealed class AgentLoop
                     history.Add(new Turn(Role.User, BuildViolationFeedback(violations)));
                     continue;
                 }
-                _log("①-b 검사 → 스킬 통과 ✅");
+                _log("①-b check  → skills passed ✅");
             }
 
             // ② 적용
             var apply = await _target.ApplyAsync(reply.Edits, ct);
-            _log($"② 적용  → {apply.Message}");
+            _log($"② apply    → {apply.Message}");
             if (!apply.Ok)
             {
-                history.Add(new Turn(Role.User, $"적용 실패: {apply.Message}. 경로를 고쳐 다시 출력하세요."));
+                history.Add(new Turn(Role.User,
+                    $"Apply failed: {apply.Message}. Fix the path and emit the files again."));
                 continue;
             }
 
@@ -104,7 +105,7 @@ public sealed class AgentLoop
             var verify = await _target.VerifyAsync(new VerifySpec(VerifyKind.Compile), ct);
             if (!verify.Ok)
             {
-                _log($"③ 검증  → {_target.LabelFor(VerifyKind.Compile)} 에러 {verify.Errors.Count}건 ❌");
+                _log($"③ verify   → {_target.LabelFor(VerifyKind.Compile)}: {verify.Errors.Count} error(s) ❌");
                 foreach (var e in verify.Errors.Take(5))
                     _log($"      · {Feedback.Clip(e, 200)}");
 
@@ -115,7 +116,7 @@ public sealed class AgentLoop
                 history.Add(new Turn(Role.User, BuildErrorFeedback(verify.Errors)));
                 continue;
             }
-            _log($"③ 검증  → {_target.LabelFor(VerifyKind.Compile)} 통과 ✅");
+            _log($"③ verify   → {_target.LabelFor(VerifyKind.Compile)} passed ✅");
 
             // ③-b 검증: 런타임 동작
             // 테스트 파일이 왔으면 **테스트 러너**로 검증한다(레포에 남는 자산 + 다중 프레임 가능).
@@ -128,7 +129,7 @@ public sealed class AgentLoop
             // TestsOnly: eval 을 아예 쓰지 않는다. 테스트가 없으면 통과시키지 않고 되돌려 요구한다.
             if (testsOnly && !useTests)
             {
-                _log("③ 검증  → 테스트 파일 없음 ❌ (tests-only 모드는 임시 스니펫을 실행하지 않습니다)");
+                _log("③ verify   → no test file ❌ (tests-only mode never runs temporary snippets)");
                 history.Add(new Turn(Role.User, TestsRequiredFeedback));
                 continue;
             }
@@ -138,21 +139,21 @@ public sealed class AgentLoop
             if (!useTests && (assertCode is null || !_target.Supports(VerifyKind.RuntimeAssert)))
             {
                 // ⑤ 판정 — 런타임 기준이 없거나 타깃이 런타임 검증을 지원하지 않으면 여기까지가 성공 기준.
-                var why = assertCode is null ? "런타임 검증 기준 없음" : "타깃이 런타임 검증 미지원";
-                return new LoopResult(true, step, $"{step}스텝 만에 적용·검증 통과 ({why})");
+                var why = assertCode is null ? "no runtime criterion" : "target has no runtime verification";
+                return new LoopResult(true, step, $"applied and verified in {step} step(s) ({why})");
             }
 
             var runtimeKind = useTests ? VerifyKind.Tests : VerifyKind.RuntimeAssert;
             var runtimeLabel = _target.LabelFor(runtimeKind);
-            var source = useTests ? "테스트 파일" : (_options.Assert is not null ? "사람 지정" : "AI 생성");
-            _log($"③ 검증  → {runtimeLabel} 실행 ({source})");
+            var source = useTests ? "test files" : (_options.Assert is not null ? "user-supplied" : "AI-written");
+            _log($"③ verify   → running {runtimeLabel} ({source})");
 
             var play = await _target.VerifyAsync(
                 new VerifySpec(runtimeKind, useTests ? null : assertCode), ct);
 
             if (!play.Ok)
             {
-                _log($"③ 검증  → {runtimeLabel} 실패 ❌  {play.Log}");
+                _log($"③ verify   → {runtimeLabel} failed ❌  {play.Log}");
                 foreach (var e in play.Errors.Take(3))
                     _log($"      · {Feedback.Clip(e, 200)}");
 
@@ -163,7 +164,7 @@ public sealed class AgentLoop
                     useTests ? BuildTestFeedback(play.Errors) : BuildAssertFeedback(play.Errors)));
                 continue;
             }
-            _log($"③ 검증  → {runtimeLabel} 통과 ✅  {play.Log}");
+            _log($"③ verify   → {runtimeLabel} passed ✅  {play.Log}");
 
             // ③-c 검증: 성능 예산 (프로파일링) — "동작 정상 ≠ 충분히 빠름"
             // PERF 블록은 eval 로 측정하므로 tests-only 모드에서는 건너뛴다
@@ -173,7 +174,7 @@ public sealed class AgentLoop
             {
                 // ⑤ 판정
                 await CaptureEvidenceAsync(goal, ct);
-                return new LoopResult(true, step, $"{step}스텝 만에 적용 + 런타임 동작 검증 통과");
+                return new LoopResult(true, step, $"applied and runtime-verified in {step} step(s)");
             }
 
             var perfLabel = _target.LabelFor(VerifyKind.Performance);
@@ -182,12 +183,12 @@ public sealed class AgentLoop
             // ⑤ 판정
             if (perf.Ok)
             {
-                _log($"③ 검증  → {perfLabel} 통과 ✅  {perf.Log}");
+                _log($"③ verify   → {perfLabel} passed ✅  {perf.Log}");
                 await CaptureEvidenceAsync(goal, ct);
-                return new LoopResult(true, step, $"{step}스텝 만에 동작 + 성능까지 검증 통과");
+                return new LoopResult(true, step, $"behavior AND performance verified in {step} step(s)");
             }
 
-            _log($"③ 검증  → {perfLabel} 초과 ❌  {perf.Log}");
+            _log($"③ verify   → {perfLabel} exceeded ❌  {perf.Log}");
             foreach (var e in perf.Errors.Take(3))
                 _log($"      · {e}");
 
@@ -195,7 +196,8 @@ public sealed class AgentLoop
             history.Add(new Turn(Role.User, BuildPerfFeedback(perf.Errors)));
         }
 
-        return new LoopResult(false, _options.MaxSteps, $"maxSteps({_options.MaxSteps}) 초과 — 미해결");
+        return new LoopResult(false, _options.MaxSteps,
+            $"gave up after {_options.MaxSteps} step(s) — still failing");
     }
 
     // ── 프롬프트/피드백 (출력 계약을 시스템 프롬프트로 강제 — DESIGN.md §4) ──────────
@@ -231,24 +233,27 @@ public sealed class AgentLoop
     }
 
     // 목표만 전달한다. 어떤 언어로 어디에 만들지는 타깃의 GenerationBrief 가 이미 시스템 프롬프트에 넣었다.
+    // 피드백은 모두 영어다 — 시스템 프롬프트가 영어라 섞으면 모델이 형식을 흔든다.
     private static string BuildInitialPrompt(string goal) =>
-        $"목표: {goal}\n\n위 목표를 만족하는 파일을 출력 계약(FILE: + 펜스 코드블록) 형식으로 생성하세요.";
+        $"GOAL: {goal}\n\nProduce the files that satisfy this goal, using the output contract " +
+        "(FILE: followed by a fenced code block).";
 
     private const string TestsRequiredFeedback = """
-        이 실행은 **테스트 파일로만** 검증합니다(임시 스니펫은 실행하지 않습니다).
-        `Assets/Tests/PlayMode/<TypeName>Tests.cs` 를 FILE 블록으로 함께 출력하세요.
-        성능이 중요한 동작이면 테스트 안에서 Stopwatch 로 재고 Assert 하세요.
+        This run verifies ONLY through compiled test files — temporary snippets are never executed.
+        Emit a PlayMode test file as a FILE block alongside the implementation.
+        If performance matters for this behavior, measure it inside the test with a Stopwatch and assert on it.
         """;
 
     private const string NoEditsFeedback =
-        "응답에서 FILE 블록을 하나도 찾지 못했습니다. 반드시 'FILE: <경로>' 다음 줄에 펜스 코드블록으로 전체 파일을 출력하세요.";
+        "No FILE block was found in your response. Emit 'FILE: <path>' followed on the next line by a " +
+        "fenced code block containing the COMPLETE file.";
 
     private static string BuildErrorFeedback(IReadOnlyList<string> errors)
     {
         var list = Feedback.Bullets(errors);
         return $"""
-            컴파일에 실패했습니다. 아래 컴파일러 에러를 고쳐서 전체 파일을 다시 출력하세요
-            (부분 수정/diff 금지 — 전체 파일 재출력):
+            Compilation FAILED. Fix these compiler errors and emit the COMPLETE file(s) again
+            (no diffs, no partial edits — full file contents):
 
             {list}
             """;
@@ -259,12 +264,13 @@ public sealed class AgentLoop
     {
         var list = Feedback.Bullets(violations.Select(v => $"{v.FilePath}: {v.Message}").ToList());
         return $"""
-            도메인 규칙(DOMAIN RULES) 위반이 발견되어 적용하지 않았습니다:
+            DOMAIN RULE violations were found, so nothing was applied:
 
             {list}
 
-            규칙을 지키도록 구현을 고쳐 전체 파일을 다시 출력하세요
-            (예: Update 계열에서 쓰던 탐색/캐싱 대상은 Awake 또는 Start 에서 한 번만 확보해 필드에 보관).
+            Fix the implementation so it follows the rules, then emit the COMPLETE file(s) again.
+            (For example: whatever you were looking up per-frame in Update should be resolved once in
+            Awake or Start and cached in a field.)
             """;
     }
 
@@ -311,7 +317,7 @@ public sealed class AgentLoop
         {
             var saved = await _target.CaptureEvidenceAsync(dest, ct);
             if (saved is not null)
-                _log($"📸 결과 화면: {saved}");
+                _log($"📸 evidence: {saved}");
         }
         catch (OperationCanceledException) { throw; }
         catch { /* 증거 수집 실패가 판정을 뒤집지는 않는다 */ }
@@ -327,12 +333,12 @@ public sealed class AgentLoop
     {
         var list = Feedback.Bullets(failures);
         return $"""
-            Unity 테스트 러너에서 **테스트가 실패**했습니다:
+            The Unity Test Runner reports FAILING TESTS:
 
             {list}
 
-            구현의 근본 원인을 고쳐 전체 파일을 다시 출력하세요.
-            테스트를 느슨하게 고쳐 통과시키지 마세요 — 검증 기준은 그대로 두고 동작을 고쳐야 합니다.
+            Fix the ROOT CAUSE in the implementation and emit the COMPLETE file(s) again.
+            Do NOT weaken the tests to make them pass — the criteria stay, the behavior changes.
             """;
     }
 
@@ -342,14 +348,15 @@ public sealed class AgentLoop
     {
         var list = Feedback.Bullets(failures);
         return $"""
-            동작은 맞지만 **성능 예산을 초과**했습니다(실측):
+            The behavior is correct, but it EXCEEDED THE PERFORMANCE BUDGET (measured):
 
             {list}
 
-            핫패스에서 매 호출 발생하는 비용을 제거해 구현을 고치고 전체 파일을 다시 출력하세요.
-            흔한 원인: 매 호출 컬렉션/배열 새로 생성, 문자열 결합·보간, LINQ, 박싱, 매번 컴포넌트 탐색.
-            → 재사용 가능한 버퍼는 필드로 올리고, 탐색 결과는 Awake/Start 에서 캐싱하세요.
-            PERF 블록의 예산(maxTotalMs)을 늘려서 통과시키지 마세요 — 기준은 그대로 두고 구현을 고쳐야 합니다.
+            Remove the per-call cost from the hot path and emit the COMPLETE file(s) again.
+            Common causes: allocating a new collection/array per call, string concatenation or
+            interpolation, LINQ, boxing, looking up components every call.
+            → Hoist reusable buffers into fields; resolve lookups once in Awake/Start and cache them.
+            Do NOT raise maxTotalMs in the PERF block to pass — the budget stays, the implementation changes.
             """;
     }
 
@@ -359,12 +366,12 @@ public sealed class AgentLoop
     {
         var list = Feedback.Bullets(failures);
         return $"""
-            컴파일은 통과했지만 **플레이모드 런타임 검증에 실패**했습니다:
+            It compiles, but the PLAY MODE RUNTIME CHECK FAILED:
 
             {list}
 
-            구현(FILE)의 근본 원인을 고쳐서 전체 파일을 다시 출력하세요.
-            assert 를 느슨하게 바꿔 통과시키지 마세요 — 검증 기준은 그대로 두고 동작을 고쳐야 합니다.
+            Fix the ROOT CAUSE in the implementation (the FILE) and emit the COMPLETE file(s) again.
+            Do NOT weaken the assert to make it pass — the criteria stay, the behavior changes.
             """;
     }
 }

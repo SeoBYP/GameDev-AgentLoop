@@ -1,45 +1,46 @@
 ---
 name: unity-performance
-title: Unity 성능 — 핫패스 규칙
+title: Unity performance — hot path rules
 always: true
 targets: unity
 ---
 
 ## GUIDANCE
-- `Update` / `FixedUpdate` / `LateUpdate` 안에서 `GetComponent`, `GameObject.Find`,
-  `FindObjectOfType`, `FindFirstObjectByType`, `Camera.main` 을 호출하지 않는다.
-  → `Awake` 또는 `Start` 에서 한 번 캐싱해 필드에 담아 두고 재사용한다.
-- 매 프레임 도는 코드에서 **GC 할당을 만들지 않는다.** 문자열 결합/보간, LINQ,
-  `new` 로 만드는 임시 컬렉션·람다 캡처가 대표적인 원인이다.
-- 코루틴에서 `new WaitForSeconds(...)` 를 루프 안에서 만들지 말고, 필드에 캐싱해 재사용한다.
-- 거리 비교는 `Vector3.Distance(a, b) < r` 대신 `(a - b).sqrMagnitude < r * r` 을 쓴다(제곱근 회피).
-- `Debug.Log` 는 릴리스 핫패스에서 비싸다. 매 프레임 로그를 남기지 않는다.
-- 몸통이 빈 `Update()` 는 아예 선언하지 않는다. Unity 는 빈 메시지 메서드도 호출한다.
-- 잦은 생성·파괴(`Instantiate`/`Destroy`)는 오브젝트 풀로 대체한다.
-- `transform.position` 같은 프로퍼티를 한 프레임에 여러 번 읽지 말고 지역 변수에 담아 쓴다.
+- Never call `GetComponent`, `GameObject.Find`, `FindObjectOfType`, `FindFirstObjectByType`,
+  or `Camera.main` inside `Update` / `FixedUpdate` / `LateUpdate`.
+  → Resolve them once in `Awake` or `Start` and cache the result in a field.
+- **Do not allocate** in code that runs every frame. The usual culprits are string
+  concatenation/interpolation, LINQ, temporary collections created with `new`, and lambda captures.
+- In coroutines, do not build `new WaitForSeconds(...)` inside a loop — cache it in a field and reuse it.
+- For distance comparisons prefer `(a - b).sqrMagnitude < r * r` over `Vector3.Distance(a, b) < r`
+  (avoids a square root).
+- `Debug.Log` is expensive on a release hot path. Do not log every frame.
+- Do not declare an `Update()` with an empty body — Unity still calls empty message methods.
+- Replace frequent `Instantiate`/`Destroy` with an object pool.
+- Do not read properties like `transform.position` several times in one frame; read once into a local.
 
 ## CHECKS
 - id: no-getcomponent-in-update
   scope: Update, FixedUpdate, LateUpdate
   forbid: \bGetComponents?\s*<
-  message: Update 계열에서 GetComponent 를 호출하지 마세요. Awake/Start 에서 캐싱한 참조를 사용하세요.
+  message: Do not call GetComponent in Update-family methods. Cache the reference in Awake/Start.
 
 - id: no-find-in-update
   scope: Update, FixedUpdate, LateUpdate
   forbid: \b(GameObject\.Find|FindObjectOfType|FindObjectsOfType|FindFirstObjectByType|FindAnyObjectByType)\b
-  message: Update 계열에서 Find 계열 탐색을 호출하지 마세요. 참조는 직렬화 필드나 Awake 캐싱으로 확보하세요.
+  message: Do not call Find-family lookups in Update-family methods. Use a serialized field or cache in Awake.
 
 - id: no-camera-main-in-update
   scope: Update, FixedUpdate, LateUpdate
   forbid: \bCamera\.main\b
-  message: Update 계열에서 Camera.main 을 쓰지 마세요. Awake/Start 에서 캐싱한 Camera 참조를 사용하세요.
+  message: Do not use Camera.main in Update-family methods. Cache the Camera reference in Awake/Start.
 
 - id: no-debuglog-in-update
   scope: Update, FixedUpdate, LateUpdate
   forbid: \bDebug\.Log
-  message: Update 계열에서 Debug.Log 를 호출하지 마세요(매 프레임 로그는 비쌉니다).
+  message: Do not call Debug.Log in Update-family methods — logging every frame is expensive.
 
 - id: no-linq-in-update
   scope: Update, FixedUpdate, LateUpdate
   forbid: \.(Where|Select|OrderBy|FirstOrDefault|Any|All|ToList|ToArray)\s*\(
-  message: Update 계열에서 LINQ 를 쓰지 마세요(GC 할당 발생). for 루프로 대체하세요.
+  message: Do not use LINQ in Update-family methods — it allocates. Use a for loop instead.

@@ -61,11 +61,11 @@ public sealed class UgsInvoker : IDisposable
         }
         catch (Exception ex)
         {
-            return new[] { $"ASSERT 블록이 올바른 JSON 배열이 아닙니다: {ex.Message}" };
+            return new[] { $"The ASSERT block is not a valid JSON array: {ex.Message}" };
         }
 
         if (cases.Count == 0)
-            return new[] { "ASSERT 블록에 검증 케이스가 없습니다." };
+            return new[] { "The ASSERT block contains no verification cases." };
 
         var failures = new List<string>();
         foreach (var c in cases)
@@ -99,13 +99,13 @@ public sealed class UgsInvoker : IDisposable
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            return (false, $"{label} → 호출 실패: {ex.Message}");
+            return (false, $"{label} → invocation failed: {ex.Message}");
         }
 
         // 실패를 기대한 케이스
         if (c.ExpectError)
             return resp.IsSuccessStatusCode
-                ? (false, $"{label} → 에러를 기대했지만 정상 응답했습니다: {Trim(body)}")
+                ? (false, $"{label} → expected an error but the call succeeded: {Trim(body)}")
                 : (true, "");
 
         if (!resp.IsSuccessStatusCode)
@@ -116,7 +116,7 @@ public sealed class UgsInvoker : IDisposable
         {
             using var doc = JsonDocument.Parse(body);
             if (!doc.RootElement.TryGetProperty("output", out var output))
-                return (false, $"{label} → 응답에 output 이 없습니다: {Trim(body)}");
+                return (false, $"{label} → the response has no output field: {Trim(body)}");
 
             if (c.Expect is null)
                 return (true, "");
@@ -131,7 +131,7 @@ public sealed class UgsInvoker : IDisposable
         }
         catch (Exception ex)
         {
-            return (false, $"{label} → 응답 해석 실패: {ex.Message} / {Trim(body)}");
+            return (false, $"{label} → could not parse the response: {ex.Message} / {Trim(body)}");
         }
     }
 
@@ -154,13 +154,13 @@ public sealed class UgsInvoker : IDisposable
         {
             // 비밀키가 섞일 수 있는 요청 내용은 절대 남기지 않는다 — 상태코드만.
             throw new InvalidOperationException(
-                $"UGS 토큰 교환 실패(HTTP {(int)resp.StatusCode}). 서비스 계정 키와 프로젝트/환경 ID 를 확인하세요.");
+                $"UGS token exchange failed (HTTP {(int)resp.StatusCode}). Check the service account key and the project/environment ids.");
         }
 
         using var doc = JsonDocument.Parse(body);
         _token = doc.RootElement.TryGetProperty("accessToken", out var t) ? t.GetString() : null;
         if (string.IsNullOrEmpty(_token))
-            throw new InvalidOperationException("UGS 토큰 교환 응답에 accessToken 이 없습니다.");
+            throw new InvalidOperationException("The UGS token exchange response has no accessToken.");
 
         _tokenAcquiredUtc = DateTime.UtcNow;
         return _token;
@@ -184,7 +184,7 @@ public sealed class UgsInvoker : IDisposable
         {
             var script = item.TryGetProperty("script", out var s) ? s.GetString() : null;
             if (string.IsNullOrWhiteSpace(script))
-                throw new FormatException("각 케이스에는 \"script\" 가 있어야 합니다.");
+                throw new FormatException("Every case must have a \"script\" field.");
 
             var prms = item.TryGetProperty("params", out var p) ? p.GetRawText() : "{}";
             var expect = item.TryGetProperty("expect", out var e) ? e.GetRawText() : null;
@@ -216,13 +216,13 @@ public static class JsonSubset
             case JsonValueKind.Object:
                 if (actual.ValueKind != JsonValueKind.Object)
                 {
-                    diffs.Add($"{path}: 객체를 기대했지만 {Describe(actual)}");
+                    diffs.Add($"{path}: expected an object but got {Describe(actual)}");
                     return;
                 }
                 foreach (var prop in expected.EnumerateObject())
                 {
                     if (!actual.TryGetProperty(prop.Name, out var child))
-                        diffs.Add($"{path}.{prop.Name}: 응답에 없음");
+                        diffs.Add($"{path}.{prop.Name}: missing from the response");
                     else
                         Match(child, prop.Value, $"{path}.{prop.Name}", diffs);
                 }
@@ -231,14 +231,14 @@ public static class JsonSubset
             case JsonValueKind.Array:
                 if (actual.ValueKind != JsonValueKind.Array)
                 {
-                    diffs.Add($"{path}: 배열을 기대했지만 {Describe(actual)}");
+                    diffs.Add($"{path}: expected an array but got {Describe(actual)}");
                     return;
                 }
                 var exp = expected.EnumerateArray().ToList();
                 var act = actual.EnumerateArray().ToList();
                 if (exp.Count != act.Count)
                 {
-                    diffs.Add($"{path}: 길이 {exp.Count} 기대, 실제 {act.Count}");
+                    diffs.Add($"{path}: expected length {exp.Count}, got {act.Count}");
                     return;
                 }
                 for (var i = 0; i < exp.Count; i++)
@@ -247,7 +247,7 @@ public static class JsonSubset
 
             default:
                 if (!ScalarEquals(actual, expected))
-                    diffs.Add($"{path}: {Describe(expected)} 기대, 실제 {Describe(actual)}");
+                    diffs.Add($"{path}: expected {Describe(expected)}, got {Describe(actual)}");
                 return;
         }
     }
@@ -268,7 +268,7 @@ public static class JsonSubset
     private static string Describe(JsonElement e) => e.ValueKind switch
     {
         JsonValueKind.String => $"\"{e.GetString()}\"",
-        JsonValueKind.Undefined => "없음",
+        JsonValueKind.Undefined => "nothing",
         _ => e.GetRawText(),
     };
 }

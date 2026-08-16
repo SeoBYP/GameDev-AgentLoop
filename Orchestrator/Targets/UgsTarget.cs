@@ -35,11 +35,11 @@ public sealed class UgsTarget : IExecTarget
     public string Name => _projectId is null ? "ugs:cloud-code" : $"ugs:{_projectId[..8]}…";
 
     public string ConnectionHint =>
-        "UGS 인증 또는 프로젝트 설정이 되어 있지 않습니다.\n" +
-        "  1) 서비스 계정 키 저장:  ugs login        (또는 환경변수 UGS_CLI_SERVICE_KEY_ID / UGS_CLI_SERVICE_SECRET_KEY)\n" +
-        "     키 발급은 Unity Cloud 대시보드 → Administration → Service Accounts (Cloud Code 권한 필요)\n" +
-        "  2) 프로젝트 지정:        --ugs-project-id <id>  (또는 ugs config set project-id <id>)\n" +
-        "  3) 환경 지정(선택):      --ugs-env production";
+        "UGS is not authenticated, or the project is not configured.\n" +
+        "  1) Credentials:  ugs login   (or set UGS_CLI_SERVICE_KEY_ID / UGS_CLI_SERVICE_SECRET_KEY)\n" +
+        "     Create a key in Unity Cloud > Administration > Service Accounts (needs Cloud Code roles)\n" +
+        "  2) Project:      --ugs-project-id <id>   (or: ugs config set project-id <id>)\n" +
+        "  3) Environment:  --ugs-env production    (optional)";
 
     // 배포는 항상, 호출 검증은 **자격 증명이 있을 때만** 지원한다.
     // (`ugs` CLI 에는 호출 명령이 없어 REST 로 직접 부른다 — UgsInvoker)
@@ -61,8 +61,8 @@ public sealed class UgsTarget : IExecTarget
 
     public string LabelFor(VerifyKind kind) => kind switch
     {
-        VerifyKind.Compile => "배포",
-        VerifyKind.RuntimeAssert => "스크립트 호출",
+        VerifyKind.Compile => "deploy",
+        VerifyKind.RuntimeAssert => "script invocation",
         _ => kind.ToString(),   // Performance/Tests 는 이 손에서 지원하지 않는다
     };
 
@@ -132,7 +132,7 @@ public sealed class UgsTarget : IExecTarget
     public async Task<ApplyResult> ApplyAsync(IReadOnlyList<FileEdit> edits, CancellationToken ct)
     {
         if (edits.Count == 0)
-            return new ApplyResult(false, "적용할 파일 편집이 없습니다(파싱된 FILE 블록 0개).");
+            return new ApplyResult(false, "No file edits to apply (0 FILE blocks parsed).");
 
         var root = Path.GetFullPath(_projectRoot);
         var written = new List<string>();
@@ -140,7 +140,7 @@ public sealed class UgsTarget : IExecTarget
         {
             var full = Path.GetFullPath(Path.Combine(_projectRoot, edit.RelativePath));
             if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                return new ApplyResult(false, $"프로젝트 밖 경로 거부: {edit.RelativePath}");
+                return new ApplyResult(false, $"Refused path outside the project: {edit.RelativePath}");
 
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
             await File.WriteAllTextAsync(full, edit.Content, new UTF8Encoding(false), ct);
@@ -148,7 +148,7 @@ public sealed class UgsTarget : IExecTarget
         }
 
         // 실제 배포는 VerifyAsync 가 한다(배포 = 검증). 여기서는 파일만 놓는다.
-        return new ApplyResult(true, $"{written.Count}개 파일 적용: {string.Join(", ", written)}");
+        return new ApplyResult(true, $"applied {written.Count} file(s): {string.Join(", ", written)}");
     }
 
     // ── ③ 검증 ────────────────────────────────────────────────────────────────
@@ -156,8 +156,8 @@ public sealed class UgsTarget : IExecTarget
     {
         VerifyKind.Compile => VerifyDeployAsync(ct),
         VerifyKind.RuntimeAssert => VerifyInvokeAsync(
-            spec.AssertCode ?? throw new ArgumentException("RuntimeAssert 는 AssertCode 가 필요합니다.", nameof(spec)), ct),
-        _ => throw new NotSupportedException($"지원하지 않는 검증: {spec.Kind}"),
+            spec.AssertCode ?? throw new ArgumentException("RuntimeAssert requires AssertCode.", nameof(spec)), ct),
+        _ => throw new NotSupportedException($"Unsupported verification: {spec.Kind}"),
     };
 
     // ── ③-a 배포 검증 ─────────────────────────────────────────────────────────
@@ -183,12 +183,12 @@ public sealed class UgsTarget : IExecTarget
         {
             // 인프라 문제는 모델 탓이 아니므로 피드백하지 않고 중단시킨다.
             throw new InvalidOperationException(
-                "호출 검증에는 UGS_CLI_SERVICE_KEY_ID / UGS_CLI_SERVICE_SECRET_KEY 가 필요합니다(.env 참고).");
+                "Invocation verification needs UGS_CLI_SERVICE_KEY_ID / UGS_CLI_SERVICE_SECRET_KEY (see .env.example).");
         }
 
-        var projectId = _projectId ?? throw new InvalidOperationException("UGS 프로젝트 ID 가 지정되지 않았습니다.");
+        var projectId = _projectId ?? throw new InvalidOperationException("No UGS project id was provided.");
         var environmentId = await ResolveEnvironmentIdAsync(ct)
-            ?? throw new InvalidOperationException($"환경 ID 를 찾지 못했습니다(환경 이름: {_environment ?? "production"}).");
+            ?? throw new InvalidOperationException($"Could not resolve the environment id (environment name: {_environment ?? "production"}).");
 
         using var invoker = new UgsInvoker(projectId, environmentId, keyId!, secret!);
         var failures = await invoker.VerifyAsync(assertJson, ct);
@@ -313,7 +313,7 @@ public sealed class UgsTarget : IExecTarget
         if (errors.Count == 0 && exitCode != 0)
         {
             var raw = (stderr + "\n" + stdout).Trim();
-            errors.Add(raw.Length == 0 ? $"ugs deploy 실패(exit {exitCode})" : Flatten(raw));
+            errors.Add(raw.Length == 0 ? $"ugs deploy failed (exit {exitCode})" : Flatten(raw));
         }
         return errors;
     }

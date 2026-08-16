@@ -43,16 +43,16 @@ public sealed class UnityEditorTarget : IExecTarget
 
     public string LabelFor(VerifyKind kind) => kind switch
     {
-        VerifyKind.Compile => "컴파일",
-        VerifyKind.RuntimeAssert => "플레이모드 assert",
-        VerifyKind.Performance => "성능 예산",
-        VerifyKind.Tests => "테스트 러너",
+        VerifyKind.Compile => "compile",
+        VerifyKind.RuntimeAssert => "PlayMode assert",
+        VerifyKind.Performance => "perf budget",
+        VerifyKind.Tests => "Test Runner",
         _ => kind.ToString(),
     };
 
     public string ConnectionHint =>
-        "Unity pipeline 서버에 연결할 수 없습니다.\n" +
-        "  → 대상 프로젝트를 Unity 에디터에서 열고, `unity pipeline list` 의 '서버 연결 가능' 이 true 인지 확인하세요.";
+        "Cannot reach the Unity pipeline server.\n" +
+        "  → Open the target project in the Unity Editor, then check `unity pipeline list` for a reachable server.";
 
     /// <summary>
     /// Unity 에디터 타깃의 생성 규격 — C# 스크립트 + 플레이모드 assert 스니펫.
@@ -212,7 +212,7 @@ public sealed class UnityEditorTarget : IExecTarget
     public async Task<ApplyResult> ApplyAsync(IReadOnlyList<FileEdit> edits, CancellationToken ct)
     {
         if (edits.Count == 0)
-            return new ApplyResult(false, "적용할 파일 편집이 없습니다(파싱된 FILE 블록 0개).");
+            return new ApplyResult(false, "No file edits to apply (0 FILE blocks parsed).");
 
         var root = Path.GetFullPath(_projectPath);
         var written = new List<string>();
@@ -222,7 +222,7 @@ public sealed class UnityEditorTarget : IExecTarget
 
             // 프로젝트 루트를 벗어나는 경로 쓰기 방지(경로 탈출 방어).
             if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                return new ApplyResult(false, $"프로젝트 밖 경로 거부: {edit.RelativePath}");
+                return new ApplyResult(false, $"Refused path outside the project: {edit.RelativePath}");
 
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
             await File.WriteAllTextAsync(full, edit.Content, new UTF8Encoding(false), ct);
@@ -232,7 +232,7 @@ public sealed class UnityEditorTarget : IExecTarget
         // 리컴파일 트리거(비동기). 실제 완료 대기·에러 수집은 VerifyAsync 가 한다.
         await RunCommandAsync("recompile", ct);
 
-        return new ApplyResult(true, $"{written.Count}개 파일 적용 + 리컴파일 트리거: {string.Join(", ", written)}");
+        return new ApplyResult(true, $"applied {written.Count} file(s), recompile triggered: {string.Join(", ", written)}");
     }
 
     // ── ③ 검증 ────────────────────────────────────────────────────────────────
@@ -240,11 +240,11 @@ public sealed class UnityEditorTarget : IExecTarget
     {
         VerifyKind.Compile => VerifyCompileAsync(ct),
         VerifyKind.RuntimeAssert => VerifyPlayModeAsync(
-            spec.AssertCode ?? throw new ArgumentException("RuntimeAssert 는 AssertCode 가 필요합니다.", nameof(spec)), ct),
+            spec.AssertCode ?? throw new ArgumentException("RuntimeAssert requires AssertCode.", nameof(spec)), ct),
         VerifyKind.Performance => VerifyPerformanceAsync(
-            spec.AssertCode ?? throw new ArgumentException("Performance 는 PERF 명세가 필요합니다.", nameof(spec)), ct),
+            spec.AssertCode ?? throw new ArgumentException("Performance requires a PERF spec.", nameof(spec)), ct),
         VerifyKind.Tests => VerifyTestsAsync(spec.AssertCode, ct),
-        _ => throw new NotSupportedException($"지원하지 않는 검증: {spec.Kind}"),
+        _ => throw new NotSupportedException($"Unsupported verification: {spec.Kind}"),
     };
 
     // ── ③-a 컴파일 검증 ────────────────────────────────────────────────────────
@@ -270,7 +270,7 @@ public sealed class UnityEditorTarget : IExecTarget
             await Task.Delay(800, ct);
         }
 
-        return new VerifyResult(false, "recompile_status 폴링 타임아웃", new[] { "<recompile timeout>" });
+        return new VerifyResult(false, "timed out polling recompile_status", new[] { "<recompile timeout>" });
     }
 
     // ── ③-b 플레이모드 런타임 검증 ──────────────────────────────────────────────
@@ -282,7 +282,7 @@ public sealed class UnityEditorTarget : IExecTarget
         // 실행 **전에** 위험한 호출을 거른다. 이건 모델의 잘못이므로 피드백으로 되돌린다.
         var unsafeHits = _allowUnsafeEval ? Array.Empty<string>() : SnippetGuard.Inspect(assertCode);
         if (unsafeHits.Count > 0)
-            return new VerifyResult(false, "", unsafeHits.Select(h => "안전 위반: " + h).ToArray());
+            return new VerifyResult(false, "", unsafeHits.Select(h => "unsafe operation: " + h).ToArray());
 
         // 리컴파일 직후엔 도메인 리로드가 끝나야 플레이모드 진입이 받아들여진다.
         // 이걸 안 기다리면 진입이 조용히 거부되고, 루프가 그걸 "코드가 틀렸다"로 오해한다.
@@ -292,7 +292,7 @@ public sealed class UnityEditorTarget : IExecTarget
         {
             // 인프라 실패는 모델 탓이 아니다 → 피드백으로 되돌리지 않고 루프를 중단시킨다.
             throw new InvalidOperationException(
-                "플레이모드 진입 실패 — 에디터가 준비되지 않았거나 진입이 거부되었습니다(에디터 상태를 확인하세요).");
+                "Could not enter play mode — the editor was not ready or refused (check the editor state).");
         }
 
         try
@@ -345,9 +345,9 @@ public sealed class UnityEditorTarget : IExecTarget
             {
                 if (report.Total == 0)
                     return new VerifyResult(false, res.StdOut,
-                        new[] { "실행된 테스트가 없습니다. 테스트 파일이 Assets/Tests/PlayMode/ 에 있는지 확인하세요." });
+                        new[] { "No tests were executed. Check that the test files are under the test directory." });
 
-                var log = $"테스트 {report.Passed}/{report.Total} 통과";
+                var log = $"{report.Passed}/{report.Total} tests passed";
                 return report.Failed == 0
                     ? new VerifyResult(true, log, Array.Empty<string>())
                     : new VerifyResult(false, log, report.Failures);
@@ -355,7 +355,7 @@ public sealed class UnityEditorTarget : IExecTarget
             await Task.Delay(1500, ct);
         }
 
-        return new VerifyResult(false, "test_status 폴링 타임아웃", new[] { "<test timeout>" });
+        return new VerifyResult(false, "timed out polling test_status", new[] { "<test timeout>" });
     }
 
     private sealed record TestReport(bool Completed, int Total, int Passed, int Failed, IReadOnlyList<string> Failures);
@@ -397,7 +397,7 @@ public sealed class UnityEditorTarget : IExecTarget
                     if (s is null || s.Equals("Passed", StringComparison.OrdinalIgnoreCase))
                         continue;
 
-                    var name = r.TryGetProperty("FullName", out var fn) ? fn.GetString() : "(이름 없음)";
+                    var name = r.TryGetProperty("FullName", out var fn) ? fn.GetString() : "(unnamed)";
                     var msg = r.TryGetProperty("Message", out var m) && m.ValueKind == JsonValueKind.String
                         ? Flatten(m.GetString() ?? "")
                         : "";
@@ -425,17 +425,17 @@ public sealed class UnityEditorTarget : IExecTarget
         }
         catch (Exception ex)
         {
-            return new VerifyResult(false, perfJson, new[] { $"PERF 블록 해석 실패: {ex.Message}" });
+            return new VerifyResult(false, perfJson, new[] { $"could not parse the PERF block: {ex.Message}" });
         }
 
         var snippet = PerfHarness.BuildSnippet(spec);
         var unsafeHits = _allowUnsafeEval ? Array.Empty<string>() : SnippetGuard.Inspect(snippet);
         if (unsafeHits.Count > 0)
-            return new VerifyResult(false, "", unsafeHits.Select(h => "안전 위반: " + h).ToArray());
+            return new VerifyResult(false, "", unsafeHits.Select(h => "unsafe operation: " + h).ToArray());
 
         await WaitUntilReadyAsync(ct);
         if (!await EnterPlayModeAsync(ct))
-            throw new InvalidOperationException("플레이모드 진입 실패 — 성능 측정을 수행할 수 없습니다.");
+            throw new InvalidOperationException("Could not enter play mode — performance cannot be measured.");
 
         try
         {
@@ -444,21 +444,21 @@ public sealed class UnityEditorTarget : IExecTarget
             if (!double.TryParse(raw, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out var elapsedMs))
             {
-                return new VerifyResult(false, res.StdOut, new[] { $"성능 측정 실행 실패: {raw}" });
+                return new VerifyResult(false, res.StdOut, new[] { $"performance measurement failed to run: {raw}" });
             }
 
             // 프로파일링 맥락(드로우콜·메모리·프레임타임)도 함께 남긴다.
             var stats = await ReadPerformanceStatsAsync(ct);
             var perCall = elapsedMs / spec.Iterations * 1000.0; // 마이크로초
-            var log = $"{spec.Component}: {spec.Iterations}회 {elapsedMs:F2}ms (호출당 {perCall:F2}µs)  {stats}";
+            var log = $"{spec.Component}: {spec.Iterations} calls in {elapsedMs:F2}ms ({perCall:F2}µs/call)  {stats}";
 
             var failures = new List<string>();
             if (elapsedMs > spec.MaxTotalMs)
             {
                 failures.Add(
-                    $"시간 예산 초과 — {spec.Component} 를 {spec.Iterations}회 호출하는 데 " +
-                    $"{elapsedMs:F2}ms 걸렸습니다(예산 {spec.MaxTotalMs:F2}ms, 호출당 {perCall:F2}µs). " +
-                    "핫패스에서 매 호출 할당하거나 불필요한 작업을 하고 있지 않은지 확인하세요.");
+                    $"time budget exceeded — {spec.Component} took " +
+                    $"{elapsedMs:F2}ms for {spec.Iterations} calls (budget {spec.MaxTotalMs:F2}ms, {perCall:F2}µs/call). " +
+                    "Check whether the hot path allocates or does unnecessary work on every call.");
             }
 
             // ③-c2 씬 렌더 비용 — 스폰형 컴포넌트는 호출이 빨라도 드로우콜을 폭증시킬 수 있다.
@@ -538,7 +538,7 @@ public sealed class UnityEditorTarget : IExecTarget
             CleanupStaging(Path.Combine(_projectPath, "Assets", tempDir));
 
             // 균일한 화면(아무것도 안 그려짐)은 PNG 가 극단적으로 작게 압축된다 — 경고용 휴리스틱.
-            return bytes < 2048 ? $"{destinationPath} (⚠ {bytes}B — 화면이 비어 있을 수 있음)" : destinationPath;
+            return bytes < 2048 ? $"{destinationPath} (⚠ {bytes}B — the view may be empty)" : destinationPath;
         }
         catch (OperationCanceledException) { throw; }
         catch
@@ -576,7 +576,7 @@ public sealed class UnityEditorTarget : IExecTarget
 
         var (_, setupResult) = await EvalWithRetryAsync(PerfHarness.BuildSceneSnippet(spec), ct);
         if (!setupResult.Trim().Equals("1", StringComparison.Ordinal))
-            return ($"[씬 비용: 준비 실패 {Feedback.Clip(setupResult, 120)}]", Array.Empty<string>());
+            return ($"[scene cost: setup failed {Feedback.Clip(setupResult, 120)}]", Array.Empty<string>());
 
         // 스폰된 오브젝트가 실제로 렌더되어 통계에 반영될 시간을 준다(프레임 경계 지표).
         await Task.Delay(2500, ct);
@@ -584,16 +584,16 @@ public sealed class UnityEditorTarget : IExecTarget
 
         var dDraw = after.DrawCalls - before.DrawCalls;
         var dTri = after.Triangles - before.Triangles;
-        var log = $"[씬 비용: drawCalls +{dDraw}, triangles +{dTri}]";
+        var log = $"[scene cost: drawCalls +{dDraw}, triangles +{dTri}]";
 
         var failures = new List<string>();
         if (spec.Scene!.MaxDrawCallIncrease is { } maxDraw && dDraw > maxDraw)
-            failures.Add($"드로우콜 예산 초과 — {spec.Component} 가 씬에 drawCall {dDraw}개를 더했습니다(예산 {maxDraw}개). " +
-                         "오브젝트를 합치거나(배칭) 스폰 수를 줄이거나 풀링을 검토하세요.");
+            failures.Add($"draw call budget exceeded — {spec.Component} added {dDraw} draw calls to the scene (budget {maxDraw}). " +
+                         "Consider batching, spawning fewer objects, or pooling.");
 
         if (spec.Scene.MaxTriangleIncrease is { } maxTri && dTri > maxTri)
-            failures.Add($"삼각형 예산 초과 — {spec.Component} 가 씬에 triangle {dTri}개를 더했습니다(예산 {maxTri}개). " +
-                         "메시 복잡도나 스폰 수를 줄이세요.");
+            failures.Add($"triangle budget exceeded — {spec.Component} added {dTri} triangles to the scene (budget {maxTri}). " +
+                         "Reduce mesh complexity or the number of spawned objects.");
 
         return (log, failures);
     }
@@ -638,7 +638,7 @@ public sealed class UnityEditorTarget : IExecTarget
             var cpu = r.TryGetProperty("frameTiming", out var ft) &&
                       ft.TryGetProperty("cpuFrameTimeMs", out var cf) ? cf.ToString() : "?";
 
-            return $"[프로파일: drawCalls={draws} mono={mono} cpuFrame={cpu}ms]";
+            return $"[profile: drawCalls={draws} mono={mono} cpuFrame={cpu}ms]";
         }
         catch
         {
@@ -726,7 +726,7 @@ public sealed class UnityEditorTarget : IExecTarget
 
             if (root.TryGetProperty("success", out var outer) && outer.ValueKind == JsonValueKind.False)
             {
-                var msg = "eval 실패";
+                var msg = "eval failed";
                 if (root.TryGetProperty("errors", out var errs) &&
                     errs.ValueKind == JsonValueKind.Array &&
                     errs.GetArrayLength() > 0 &&
@@ -756,13 +756,13 @@ public sealed class UnityEditorTarget : IExecTarget
                     var t = text.Trim();
                     var ok = t.Equals("OK", StringComparison.OrdinalIgnoreCase) ||
                              t.Equals("true", StringComparison.OrdinalIgnoreCase);
-                    return (ok, t.Length == 0 ? "<assert 반환값 없음>" : t);
+                    return (ok, t.Length == 0 ? "<assert returned nothing>" : t);
                 }
             }
         }
         catch { /* 아래 폴백 */ }
 
-        return (false, "eval 결과를 해석하지 못했습니다.");
+        return (false, "Could not interpret the eval result.");
     }
 
     private static string Flatten(string s) =>

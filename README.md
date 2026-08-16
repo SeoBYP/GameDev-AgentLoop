@@ -195,13 +195,13 @@ agentloop --skills off       # disable them
 
 | Path | Contents | Language |
 |---|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Execution graph, trace tree, and self-improvement design (Mermaid diagrams) | 🇰🇷 *EN translation pending* |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Execution graph, trace tree, and self-improvement design (Mermaid diagrams) | EN · [KO](docs/ARCHITECTURE.ko.md) |
 | [Orchestrator/](Orchestrator/README.md) | The loop itself — contracts, backends, targets, verification | 🇰🇷 |
 | [Skills/](Skills/README.md) | Domain knowledge layer — guidance and static checks | 🇰🇷 |
 | [docs/DESIGN.md](docs/DESIGN.md) | Decision log — *why* each choice was made | 🇰🇷 |
 | [docs/WORKLOG.md](docs/WORKLOG.md) | Build log — what broke and how it was fixed | 🇰🇷 |
 
-> Deep-dive docs are currently Korean-only; the README and CONTRIBUTING are bilingual.
+> `DESIGN` and `WORKLOG` are development logs kept in Korean.
 > Translations are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---

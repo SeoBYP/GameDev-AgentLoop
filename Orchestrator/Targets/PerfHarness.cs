@@ -51,15 +51,15 @@ public static class PerfHarness
         string Req(string name) =>
             root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s
                 ? s
-                : throw new FormatException($"PERF 블록에 \"{name}\" 문자열이 필요합니다.");
+                : throw new FormatException($"The PERF block requires a \"{name}\" string.");
 
         var iterations = root.TryGetProperty("iterations", out var it) && it.TryGetInt32(out var n) ? n : 10000;
         var budget = root.TryGetProperty("maxTotalMs", out var b) && b.TryGetDouble(out var d) ? d : 0;
 
         if (iterations <= 0)
-            throw new FormatException("PERF 의 iterations 는 1 이상이어야 합니다.");
+            throw new FormatException("PERF iterations must be at least 1.");
         if (budget <= 0)
-            throw new FormatException("PERF 에 \"maxTotalMs\"(양수)가 필요합니다.");
+            throw new FormatException("PERF requires a positive \"maxTotalMs\".");
 
         var setup = root.TryGetProperty("setup", out var s2) && s2.ValueKind == JsonValueKind.String
             ? s2.GetString()
@@ -72,14 +72,14 @@ public static class PerfHarness
                 ? ss.GetString()
                 : null;
             if (string.IsNullOrWhiteSpace(sceneSetup))
-                throw new FormatException("PERF 의 scene 에는 \"setup\" 이 필요합니다.");
+                throw new FormatException("PERF scene requires a \"setup\" statement.");
 
             int? Opt(string name) =>
                 sc.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : null;
 
             scene = new SceneBudget(sceneSetup!, Opt("maxDrawCallIncrease"), Opt("maxTriangleIncrease"));
             if (scene.MaxDrawCallIncrease is null && scene.MaxTriangleIncrease is null)
-                throw new FormatException("PERF 의 scene 에는 maxDrawCallIncrease 또는 maxTriangleIncrease 가 필요합니다.");
+                throw new FormatException("PERF scene requires maxDrawCallIncrease or maxTriangleIncrease.");
         }
 
         return new PerfSpec(Req("component"), Req("call"), setup, iterations, budget, scene);
