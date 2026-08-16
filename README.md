@@ -20,7 +20,8 @@
 | ③-a **컴파일** | *"그럴듯한데 안 도는 코드"* | `unity command recompile_status` 로 실제 컴파일 에러 수집 |
 | ③-b **런타임 동작** | *"컴파일은 되는데 로직이 틀린 코드"* | **Unity Test Runner** 로 실행(없으면 플레이모드 `eval` assert) |
 | ③-b′ **시나리오·입력** | *"한 프레임만 보면 맞아 보이는 코드"* | **`[UnityTest]` 코루틴** + **가상 입력 주입**(`InputTestFixture`)으로 조작 시나리오 검증 |
-| ③-c **성능 예산** | *"동작은 맞는데 매 프레임 할당하는 코드"* | 핫패스를 5만 회 돌려 **경과 시간 실측** + 프로파일 통계 |
+| ③-c **성능 예산** | *"동작은 맞는데 매 프레임 할당하는 코드"* | 핫패스를 5만 회 돌려 **경과 시간 실측** |
+| ③-c′ **렌더 예산** | *"빠른데 드로우콜을 폭증시키는 코드"* | 씬에 남기는 **드로우콜·삼각형 증가분 실측** |
 | ①-b **도메인 품질** | *"돌지만 잘못 만든 코드"* | 스킬 정적 검사로 **적용 전 반려** |
 
 검증은 **자산으로 남는다** — AI가 구현과 함께 PlayMode 테스트를 작성하고,
@@ -85,6 +86,7 @@ dotnet run --project Orchestrator -- --demo         # 컴파일 에러 → 자�
 dotnet run --project Orchestrator -- --demo-play    # 컴파일은 통과하나 동작이 틀림
 dotnet run --project Orchestrator -- --demo-skills  # 도메인 규칙 위반 → 적용 거부
 dotnet run --project Orchestrator -- --demo-perf    # 동작은 맞으나 성능 예산 초과
+dotnet run --project Orchestrator -- --demo-draw    # 빠르지만 드로우콜 폭증 → 렌더 예산 초과
 
 # 실제 AI 로 (API 키 불필요 — CLI 로그인만)
 dotnet run --project Orchestrator -- --claude "간단한 HP 컴포넌트를 만들어줘"

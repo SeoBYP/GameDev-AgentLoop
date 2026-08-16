@@ -24,4 +24,36 @@ public class InputSmokeTest : InputTestFixture
 
         Assert.IsFalse(keyboard.spaceKey.isPressed, "키를 뗐는데도 눌린 상태입니다.");
     }
+
+    [UnityTest]
+    public IEnumerator VirtualMouse_MoveAndClick_IsSeen()
+    {
+        var mouse = InputSystem.AddDevice<Mouse>();
+
+        Set(mouse.position, new Vector2(640f, 360f));
+        Press(mouse.leftButton);
+        yield return null;
+
+        Assert.IsTrue(mouse.leftButton.isPressed, "가상 마우스 클릭이 반영되지 않았습니다.");
+        Assert.AreEqual(640f, mouse.position.x.ReadValue(), 0.5f, "마우스 위치가 반영되지 않았습니다.");
+
+        Release(mouse.leftButton);
+        yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator VirtualGamepad_StickAndButton_AreSeen()
+    {
+        var pad = InputSystem.AddDevice<Gamepad>();
+
+        Set(pad.leftStick, new Vector2(1f, 0f));
+        Press(pad.buttonSouth);
+        yield return null;
+
+        Assert.Greater(pad.leftStick.x.ReadValue(), 0.5f, "스틱 입력이 반영되지 않았습니다.");
+        Assert.IsTrue(pad.buttonSouth.isPressed, "패드 버튼 입력이 반영되지 않았습니다.");
+
+        Release(pad.buttonSouth);
+        yield return null;
+    }
 }

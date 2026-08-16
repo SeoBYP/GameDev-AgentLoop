@@ -104,10 +104,15 @@ public sealed class UnityEditorTarget : IExecTarget
                   }
               }
 
-              Available helpers: `Press`/`Release`/`PressAndRelease` (ButtonControl),
-              `Set(control, value)` (sticks/axes), `SetTouch(...)`.
-              Devices: `InputSystem.AddDevice<Keyboard>()` / `<Mouse>()` / `<Gamepad>()`.
-              `using UnityEngine.InputSystem;` is required; the test assembly already references it.
+              Devices and helpers (`using UnityEngine.InputSystem;` — already referenced):
+                * Keyboard — `var kb = InputSystem.AddDevice<Keyboard>();`
+                             `Press(kb.spaceKey)` / `Release(...)` / `PressAndRelease(...)`
+                * Mouse    — `var m = InputSystem.AddDevice<Mouse>();`
+                             `Set(m.position, new Vector2(640f, 360f));` then `Press(m.leftButton)`
+                * Gamepad  — `var pad = InputSystem.AddDevice<Gamepad>();`
+                             `Set(pad.leftStick, new Vector2(1f, 0f));` / `Press(pad.buttonSouth)`
+                * Touch    — `SetTouch(0, TouchPhase.Began, new Vector2(x, y));`
+              Always `yield return null;` after injecting input so it is processed.
             * Do NOT emit an ASSERT block when you write tests.
 
         - If (and only if) you do NOT write tests, emit EXACTLY ONE runtime check as:
@@ -142,6 +147,15 @@ public sealed class UnityEditorTarget : IExecTarget
             * Budget guidance: allocation-free work is roughly 0.1µs/call on a desktop editor;
               allocating per call is 5-10x slower. Pick a budget that a clean implementation
               passes comfortably but a per-call-allocating one does not.
+            * If the component SPAWNS objects into the scene, also add a render budget:
+
+              { "component": "...", "call": "...", "iterations": 1, "maxTotalMs": 50,
+                "scene": { "setup": "target.SpawnWave()",
+                           "maxDrawCallIncrease": 60, "maxTriangleIncrease": 5000 } }
+
+              The loop runs `scene.setup` in play mode, waits for frames to render, and compares
+              the increase against the budget. Use it whenever the goal implies many objects
+              (bullets, particles, tiles) — fast code that floods draw calls still fails a game.
         """;
 
     public UnityEditorTarget(
@@ -251,9 +265,10 @@ public sealed class UnityEditorTarget : IExecTarget
             var ok = message.Trim().Equals("OK", StringComparison.OrdinalIgnoreCase) ||
                      message.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
 
+            // Log 에 eval 원본 JSON 을 넣으면 콘솔이 지저분해진다 — 요약만 남긴다(전문은 실행 로그 파일로).
             return ok
-                ? new VerifyResult(true, res.StdOut, Array.Empty<string>())
-                : new VerifyResult(false, res.StdOut, new[] { message });
+                ? new VerifyResult(true, "", Array.Empty<string>())
+                : new VerifyResult(false, Feedback.Clip(res.StdOut, 500), new[] { message });
         }
         finally
         {
@@ -396,19 +411,31 @@ public sealed class UnityEditorTarget : IExecTarget
                 return new VerifyResult(false, res.StdOut, new[] { $"성능 측정 실행 실패: {raw}" });
             }
 
-            // 프로파일링 맥락(드로우콜·메모리·프레임타임)도 함께 남긴다 — 판정 기준은 아니지만 진단에 쓰인다.
+            // 프로파일링 맥락(드로우콜·메모리·프레임타임)도 함께 남긴다.
             var stats = await ReadPerformanceStatsAsync(ct);
             var perCall = elapsedMs / spec.Iterations * 1000.0; // 마이크로초
             var log = $"{spec.Component}: {spec.Iterations}회 {elapsedMs:F2}ms (호출당 {perCall:F2}µs)  {stats}";
 
-            return elapsedMs <= spec.MaxTotalMs
-                ? new VerifyResult(true, log, Array.Empty<string>())
-                : new VerifyResult(false, log, new[]
-                {
-                    $"성능 예산 초과 — {spec.Component} 를 {spec.Iterations}회 호출하는 데 " +
+            var failures = new List<string>();
+            if (elapsedMs > spec.MaxTotalMs)
+            {
+                failures.Add(
+                    $"시간 예산 초과 — {spec.Component} 를 {spec.Iterations}회 호출하는 데 " +
                     $"{elapsedMs:F2}ms 걸렸습니다(예산 {spec.MaxTotalMs:F2}ms, 호출당 {perCall:F2}µs). " +
-                    "핫패스에서 매 호출 할당하거나 불필요한 작업을 하고 있지 않은지 확인하세요.",
-                });
+                    "핫패스에서 매 호출 할당하거나 불필요한 작업을 하고 있지 않은지 확인하세요.");
+            }
+
+            // ③-c2 씬 렌더 비용 — 스폰형 컴포넌트는 호출이 빨라도 드로우콜을 폭증시킬 수 있다.
+            if (spec.Scene is not null)
+            {
+                var (sceneLog, sceneFailures) = await MeasureSceneCostAsync(spec, ct);
+                log += "  " + sceneLog;
+                failures.AddRange(sceneFailures);
+            }
+
+            return failures.Count == 0
+                ? new VerifyResult(true, log, Array.Empty<string>())
+                : new VerifyResult(false, log, failures);
         }
         finally
         {
@@ -495,6 +522,65 @@ public sealed class UnityEditorTarget : IExecTarget
                 File.Delete(meta);
         }
         catch { /* 정리 실패는 무시 */ }
+    }
+
+    /// <summary>
+    /// 컴포넌트가 **씬에 남기는 렌더 비용**을 잰다: 베이스라인 → 씬 상태 생성 → 렌더 대기 → 증가분.
+    ///
+    /// 정리 코드가 없는 이유(의도적): 플레이모드를 빠져나가면 Unity 가 런타임 생성물을 전부 되돌린다.
+    /// 직접 파괴하려 들면 "무엇이 새로 생겼는지" 추적해야 하는데, 플레이모드 이탈이 그걸 공짜로 해 준다.
+    ///
+    /// 실측 근거: 큐브 60개 스폰 시 drawCalls 24→264, triangles 1,703→4,583 으로 또렷하게 반응하고
+    /// 정리 후 정확히 복귀했다. 반면 monoUsedBytes 는 GC 요동으로 감소하기도 해 예산에서 제외했다.
+    /// </summary>
+    private async Task<(string Log, IReadOnlyList<string> Failures)> MeasureSceneCostAsync(
+        PerfSpec spec, CancellationToken ct)
+    {
+        var before = await ReadRenderStatsAsync(ct);
+
+        var (_, setupResult) = await EvalWithRetryAsync(PerfHarness.BuildSceneSnippet(spec), ct);
+        if (!setupResult.Trim().Equals("1", StringComparison.Ordinal))
+            return ($"[씬 비용: 준비 실패 {Feedback.Clip(setupResult, 120)}]", Array.Empty<string>());
+
+        // 스폰된 오브젝트가 실제로 렌더되어 통계에 반영될 시간을 준다(프레임 경계 지표).
+        await Task.Delay(2500, ct);
+        var after = await ReadRenderStatsAsync(ct);
+
+        var dDraw = after.DrawCalls - before.DrawCalls;
+        var dTri = after.Triangles - before.Triangles;
+        var log = $"[씬 비용: drawCalls +{dDraw}, triangles +{dTri}]";
+
+        var failures = new List<string>();
+        if (spec.Scene!.MaxDrawCallIncrease is { } maxDraw && dDraw > maxDraw)
+            failures.Add($"드로우콜 예산 초과 — {spec.Component} 가 씬에 drawCall {dDraw}개를 더했습니다(예산 {maxDraw}개). " +
+                         "오브젝트를 합치거나(배칭) 스폰 수를 줄이거나 풀링을 검토하세요.");
+
+        if (spec.Scene.MaxTriangleIncrease is { } maxTri && dTri > maxTri)
+            failures.Add($"삼각형 예산 초과 — {spec.Component} 가 씬에 triangle {dTri}개를 더했습니다(예산 {maxTri}개). " +
+                         "메시 복잡도나 스폰 수를 줄이세요.");
+
+        return (log, failures);
+    }
+
+    private sealed record RenderStats(int DrawCalls, int Triangles);
+
+    private async Task<RenderStats> ReadRenderStatsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var res = await RunCommandAsync("get_performance_stats", ct);
+            using var doc = JsonDocument.Parse(res.StdOut.Trim());
+            if (doc.RootElement.TryGetProperty("data", out var data) &&
+                data.TryGetProperty("result", out var r) &&
+                r.TryGetProperty("render", out var render))
+            {
+                var dc = render.TryGetProperty("drawCalls", out var d) && d.TryGetInt32(out var dv) ? dv : 0;
+                var tri = render.TryGetProperty("triangles", out var t) && t.TryGetInt32(out var tv) ? tv : 0;
+                return new RenderStats(dc, tri);
+            }
+        }
+        catch { /* 아래 기본값 */ }
+        return new RenderStats(0, 0);
     }
 
     /// <summary>프로파일링 통계(드로우콜·메모리·프레임타임)를 한 줄로 요약한다.</summary>

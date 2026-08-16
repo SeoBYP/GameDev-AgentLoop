@@ -104,6 +104,10 @@ else if (opts.DemoPerf)
 {
     backend = new ScriptedBackend(DemoScript.CorrectButSlowThenFast);
 }
+else if (opts.DemoDraw)
+{
+    backend = new ScriptedBackend(DemoScript.FastButDrawHeavy);
+}
 else if (opts.Claude)
 {
     // "이 AI 채팅"(Claude Code CLI)을 두뇌로 — 별도 API 키 불필요(CLI 로그인만).
@@ -197,6 +201,7 @@ static Options ParseArgs(string[] args)
             case "--demo-play": o.DemoPlay = true; break;
             case "--demo-skills": o.DemoSkills = true; break;
             case "--demo-perf": o.DemoPerf = true; break;
+            case "--demo-draw": o.DemoDraw = true; break;
             case "--no-perf": o.NoPerf = true; break;
             case "--capture": o.Capture = true; break;
             case "--allow-unsafe-eval": o.AllowUnsafeEval = true; break;
@@ -235,6 +240,8 @@ static Options ParseArgs(string[] args)
             o.Goal = "대상을 따라가는 Follower 컴포넌트를 만들어줘. 속도와 대상은 인스펙터에서 설정한다.";
         else if (o.DemoPerf)
             o.Goal = "점수를 기록하는 ScoreTracker 컴포넌트를 만들어줘. Record(int) 는 매 프레임 불릴 수 있다.";
+        else if (o.DemoDraw)
+            o.Goal = "격자 타일을 스폰하는 TileField 컴포넌트를 만들어줘. Build() 로 바닥 타일을 깐다.";
     }
     return o;
 }
@@ -285,6 +292,7 @@ sealed class Options
     public bool DemoPlay { get; set; }
     public bool DemoSkills { get; set; }
     public bool DemoPerf { get; set; }
+    public bool DemoDraw { get; set; }
     public bool NoPerf { get; set; }
     public bool Capture { get; set; }
     public bool AllowUnsafeEval { get; set; }
@@ -500,6 +508,105 @@ static class DemoScript
         bool has = f.HasTarget;
         UnityEngine.Object.DestroyImmediate(go);
         return has ? "target 이 없는데 HasTarget 이 true 입니다." : "OK";
+        ```
+        """,
+    };
+
+    // --demo-draw 스크립트: **빠르지만 드로우콜을 폭증시키는** 코드를 렌더 예산이 잡아낸다.
+    // 시간 예산은 통과한다(스폰 자체는 싸다) — 시간만 재면 놓치는 결함이라 렌더 예산이 따로 필요하다.
+    // step 1) 타일을 하나씩 개별 GameObject 로 스폰(드로우콜 폭증) → 예산 초과.
+    // step 2) 스폰 수를 줄여 예산 안으로.
+    public static readonly IReadOnlyList<string> FastButDrawHeavy = new[]
+    {
+        // step 1 — 64개 개별 오브젝트. 호출은 빠르지만 드로우콜이 치솟는다.
+        """
+        FILE: Assets/Scripts/TileField.cs
+        ```csharp
+        using System.Collections.Generic;
+        using UnityEngine;
+
+        public class TileField : MonoBehaviour
+        {
+            [SerializeField] private int _tilesPerSide = 8;
+
+            private readonly List<GameObject> _spawned = new List<GameObject>(64);
+
+            public int SpawnedCount => _spawned.Count;
+
+            public void Build()
+            {
+                for (int x = 0; x < _tilesPerSide; x++)
+                {
+                    for (int z = 0; z < _tilesPerSide; z++)
+                    {
+                        var tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        tile.transform.SetParent(transform, false);
+                        tile.transform.localPosition = new Vector3(x, 0f, z);
+                        _spawned.Add(tile);
+                    }
+                }
+            }
+        }
+        ```
+        ASSERT:
+        ```csharp
+        var go = new UnityEngine.GameObject();
+        var f = go.AddComponent<TileField>();
+        f.Build();
+        int n = f.SpawnedCount;
+        UnityEngine.Object.DestroyImmediate(go);
+        return n == 64 ? "OK" : ("타일이 64개여야 하는데 " + n + " 개였습니다.");
+        ```
+        PERF:
+        ```json
+        { "component": "TileField", "call": "target.SpawnedCount", "iterations": 1000, "maxTotalMs": 25,
+          "scene": { "setup": "target.Build()", "maxDrawCallIncrease": 120 } }
+        ```
+        """,
+
+        // step 2 — 4x4 로 줄여 렌더 예산 안으로(같은 동작, 적은 비용).
+        """
+        FILE: Assets/Scripts/TileField.cs
+        ```csharp
+        using System.Collections.Generic;
+        using UnityEngine;
+
+        public class TileField : MonoBehaviour
+        {
+            [SerializeField] private int _tilesPerSide = 4;
+
+            private readonly List<GameObject> _spawned = new List<GameObject>(16);
+
+            public int SpawnedCount => _spawned.Count;
+
+            public void Build()
+            {
+                for (int x = 0; x < _tilesPerSide; x++)
+                {
+                    for (int z = 0; z < _tilesPerSide; z++)
+                    {
+                        var tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        tile.transform.SetParent(transform, false);
+                        tile.transform.localPosition = new Vector3(x, 0f, z);
+                        _spawned.Add(tile);
+                    }
+                }
+            }
+        }
+        ```
+        ASSERT:
+        ```csharp
+        var go = new UnityEngine.GameObject();
+        var f = go.AddComponent<TileField>();
+        f.Build();
+        int n = f.SpawnedCount;
+        UnityEngine.Object.DestroyImmediate(go);
+        return n == 16 ? "OK" : ("타일이 16개여야 하는데 " + n + " 개였습니다.");
+        ```
+        PERF:
+        ```json
+        { "component": "TileField", "call": "target.SpawnedCount", "iterations": 1000, "maxTotalMs": 25,
+          "scene": { "setup": "target.Build()", "maxDrawCallIncrease": 120 } }
         ```
         """,
     };

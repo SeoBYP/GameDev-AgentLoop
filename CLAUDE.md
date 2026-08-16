@@ -94,5 +94,12 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
   전용 도구가 아니라 **테스트가 하는 일**이라 `[UnityTest]`(시나리오)와 그대로 합쳐진다.
 - **eval 격리 = `--tests-only`(감사 가능성)** — eval 은 사용자 에디터 프로세스에서 돌아 **코드로 샌드박싱 불가**.
   대신 임시 스니펫 실행을 없애고 **컴파일된 테스트 파일로만** 검증한다. 진짜 격리(전용 계정·VM)는 운영 절차로 문서화(DESIGN §6.12).
-- 다음: 드로우콜·메모리 예산 승격, 마우스·게임패드 입력 시나리오.
+- **렌더 예산 승격 완료** — `PERF` 의 `scene` 블록(setup + maxDrawCallIncrease/maxTriangleIncrease).
+  측정: 베이스라인 → 씬 생성 → 렌더 대기 → 증가분. 정리는 **플레이모드 이탈이 자동으로** 해 준다.
+  `--demo-draw`: 시간 0.01ms 통과하나 drawCalls +257 로 초과 → +64 로 통과.
+  - **메모리는 예산에서 제외**(실측): monoUsedBytes 는 GC 요동으로 감소하기도 해 판정 불가 → 진단 기록만.
+  - 캘리브레이션 필수: 큐브 1개 ≈ drawCall 4개(조명·패스). 오브젝트 수로 추정하면 틀린다.
+- **마우스·게임패드 입력 실측 완료** — `Set(mouse.position)`/`Press(leftButton)`, `Set(pad.leftStick)`/`Press(buttonSouth)`. 스모크 12/12.
+- 데모 5종: `--demo` `--demo-play` `--demo-skills` `--demo-perf` `--demo-draw`
+- 다음: 터치 입력(`SetTouch`) 실측, 빌드 성능과 에디터 측정치 차이 보정.
 - 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

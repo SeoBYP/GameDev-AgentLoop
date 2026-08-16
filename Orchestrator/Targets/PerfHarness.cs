@@ -12,7 +12,23 @@ public sealed record PerfSpec(
     string Call,          // 반복 호출할 식. 대상 인스턴스는 `target` 이라는 이름으로 제공된다
     string? Setup,        // (선택) 측정 전 1회 실행할 준비 코드
     int Iterations,
-    double MaxTotalMs);
+    double MaxTotalMs,
+    SceneBudget? Scene);  // (선택) 씬에 남는 렌더 비용 예산
+
+/// <summary>
+/// 컴포넌트가 **씬에 남기는 렌더 비용** 예산.
+///
+/// 시간 측정(핫패스 호출 비용)과 다른 축이다 — 오브젝트를 스폰하는 컴포넌트는 호출이 빨라도
+/// 드로우콜을 폭증시킬 수 있다. 그래서 `Setup` 을 실행해 씬에 상태를 만든 뒤,
+/// 프레임이 렌더될 시간을 주고 **베이스라인 대비 증가분**을 본다.
+///
+/// 메모리는 넣지 않았다(실측): Boehm GC 요동 때문에 `monoUsedBytes` 델타가 음수로도 나온다.
+/// 판정 기준으로 쓸 만큼 안정적이지 않아 **진단 기록으로만** 남긴다.
+/// </summary>
+public sealed record SceneBudget(
+    string Setup,                 // 씬 상태를 만드는 코드(예: target.SpawnWave())
+    int? MaxDrawCallIncrease,
+    int? MaxTriangleIncrease);
 
 /// <summary>
 /// 플레이모드에서 실행할 성능 측정 스니펫을 만든다.
@@ -49,7 +65,50 @@ public static class PerfHarness
             ? s2.GetString()
             : null;
 
-        return new PerfSpec(Req("component"), Req("call"), setup, iterations, budget);
+        SceneBudget? scene = null;
+        if (root.TryGetProperty("scene", out var sc) && sc.ValueKind == JsonValueKind.Object)
+        {
+            var sceneSetup = sc.TryGetProperty("setup", out var ss) && ss.ValueKind == JsonValueKind.String
+                ? ss.GetString()
+                : null;
+            if (string.IsNullOrWhiteSpace(sceneSetup))
+                throw new FormatException("PERF 의 scene 에는 \"setup\" 이 필요합니다.");
+
+            int? Opt(string name) =>
+                sc.TryGetProperty(name, out var v) && v.TryGetInt32(out var n) ? n : null;
+
+            scene = new SceneBudget(sceneSetup!, Opt("maxDrawCallIncrease"), Opt("maxTriangleIncrease"));
+            if (scene.MaxDrawCallIncrease is null && scene.MaxTriangleIncrease is null)
+                throw new FormatException("PERF 의 scene 에는 maxDrawCallIncrease 또는 maxTriangleIncrease 가 필요합니다.");
+        }
+
+        return new PerfSpec(Req("component"), Req("call"), setup, iterations, budget, scene);
+    }
+
+    /// <summary>
+    /// 표현식을 "문"으로 만든다.
+    ///
+    /// 왜: `call` 로 프로퍼티 읽기(`target.Count`)가 오면 C# 에서 그건 문이 될 수 없어
+    /// "Only assignment, call, increment, decrement, await, and new object expressions can be used
+    /// as a statement" 로 컴파일이 깨진다(실측). 메서드 호출이면 그대로 두고,
+    /// 값 표현식이면 `_ =` 로 버려 문으로 만든다 — 최적화로 사라지지 않게 discard 를 쓴다.
+    /// </summary>
+    private static string AsStatement(string expr)
+    {
+        var e = expr.Trim().TrimEnd(';').TrimEnd();
+        return e.EndsWith(')') ? e : $"_ = {e}";
+    }
+
+    /// <summary>씬에 상태를 만드는 스니펫. 정리하지 않는다 — 플레이모드를 빠져나가면 자동으로 사라진다.</summary>
+    public static string BuildSceneSnippet(PerfSpec spec)
+    {
+        var setup = AsStatement(spec.Scene!.Setup);
+        return $$"""
+            var __go = new UnityEngine.GameObject();
+            var target = __go.AddComponent<{{spec.Component}}>();
+            {{setup}};
+            return 1;
+            """;
     }
 
     /// <summary>
@@ -58,8 +117,8 @@ public static class PerfHarness
     /// </summary>
     public static string BuildSnippet(PerfSpec spec)
     {
-        var call = spec.Call.TrimEnd().TrimEnd(';');
-        var setup = string.IsNullOrWhiteSpace(spec.Setup) ? "" : spec.Setup!.TrimEnd().TrimEnd(';') + ";";
+        var call = AsStatement(spec.Call);
+        var setup = string.IsNullOrWhiteSpace(spec.Setup) ? "" : AsStatement(spec.Setup!) + ";";
 
         return $$"""
             var __go = new UnityEngine.GameObject();
