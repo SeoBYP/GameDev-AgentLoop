@@ -111,8 +111,45 @@ The outer loop works because **the instrumentation to judge a plan already exist
 | one Work span retried more than N times | Work retry count | **the node is too big** | dynamic |
 | ownership violations repeat on the same node | Apply `Fail` reason | **the boundary is wrong** — it cannot finish without touching someone else's files | dynamic |
 | RED gate keeps passing vacuously | RedGate `Fail` | **a node with no substance** — nothing to verify | dynamic |
-| a later node cannot find an earlier node's types | VerifyCompile pattern | **dependency order is inverted** | static |
+| a later node cannot find an earlier node's types | VerifyCompile pattern | **dependency order is inverted**, *or* `reads` was never delivered — see below | static |
 | A → B → A | the work graph itself | **cyclic dependency** | static |
+
+**[now] That fourth signal has two causes, and this table used to name only one.** Measured in
+`Sample/Roguelike` slice 3: dependency order was correct (grid → actor → movement) and the node still
+failed 4 of 4 steps with `CS0246`, because the loop puts the goal, the model's own recent replies and
+verification errors into the context and **not the state of the project**. The namespace and the member
+names could only be guessed.
+
+Telling the two apart is mechanical: if the type the node cannot find was produced by an **earlier**
+node, the order is fine and the `reads` set is missing; if it belongs to a **later** node, the order is
+inverted. So this row splits by *when the referenced node ran*, not by the error text.
+
+The delivery mechanism is [`ProjectSurface`](../Orchestrator/Targets/ProjectSurface.cs) — the existing
+public surface (namespaces, types, **constructors**, member signatures; bodies dropped) appended to the
+system prompt. Measured on the same goal and backend:
+
+| `reads` delivered as | steps | outcome |
+|---|---|---|
+| nothing | 4 | ❌ gave up, `CS0246` oscillating — steps 3 and 4 reproduced step 1's error coordinates |
+| hand-written, constructors omitted | 2 | ✅ 25/25 — and the one failure was `CS7036` on exactly the omitted constructor |
+| generated, complete (852 chars) | **1** | ✅ 27/27 |
+
+The middle row is the useful one: the digest's completeness, not its presence, sets the step count, and
+the failure lands precisely on what was left out.
+
+Two further consequences worth carrying:
+
+- **`Fail` was the wrong branch** (§5.3). `Fail` means *the model can fix this*; here it provably could
+  not, because the missing information was not in the loop. A missing input is neither the model's fault
+  nor infrastructure's. So `--reads` that resolves to nothing now **refuses before generation**, the same
+  way §3.2 refuses overlapping ownership — better now than later.
+- **Repair quality tracks what the error message carries.** `CS0246` ("not found") never converged;
+  `CS7036` ("this signature is required") was fixed in one step. Feedback quality is not one number, and
+  §9.2's distiller needs that distinction to decide which failures are worth distilling into a skill.
+
+Had §4 been built first, none of this would have needed a new mechanism: §4.1 says the RED artifact is
+**skeleton + test** and *the skeleton is the contract*. The digest is a stand-in for skeletons we never
+produced, because slices were run as whole features instead of RED-first nodes.
 
 ### 2.3 Static checks — reject before applying
 
@@ -183,7 +220,43 @@ Each node declares the paths it will write, and the `Apply` node enforces it:
 ```
 
 - writing outside its ownership → `Fail` (the model's fault, so feedback can fix it)
-- overlapping ownership between nodes → refuse to start (better now than later)
+- overlapping ownership between nodes → refuse to start (better now than later) — **[planned]**, there is
+  only one node today
+
+**[now]** the write check is enforced, in [`Ownership`](../Orchestrator/Loop/Ownership.cs) and
+`ApplyNode` (`--owns <glob,glob>`). It runs **before** `ApplyAsync`, because catching a violation after
+the write means the neighbour's file is already gone.
+
+It was built because the unguarded case was measured, not anticipated (§8.3): a starved node rewrote
+`Actor` and `DungeonGrid`, rewrote the tests that broke, and the loop reported success. Re-running that
+same starved configuration with ownership declared caught it in the act:
+
+```
+②-a owns   → 2 path(s) outside ownership ❌
+      · Assets/Scripts/Core/Actor.cs
+      · Assets/Scripts/Core/DungeonGrid.cs
+❌ FAILED — gave up after 4 step(s) — still failing
+```
+
+`Actor.cs`, `DungeonGrid.cs` and all 18 of their tests came through untouched, `seed` and `TileType`
+included. The run failed — correctly. **An honest failure is the goal here; the alternative was a false
+success that shipped a deleted contract.** So the same starvation now has one outcome instead of two.
+
+**Ownership cannot be inferred, only declared**, and the default proves why. The five demos write to
+files that already exist in this repo (`Assets/Scripts/DemoHealth.cs` among them), so defaulting to
+"every pre-existing file is protected" would break §11's step-1 regression bar outright. With no plan
+layer to produce `owns[]` (§2.1), the CLI declares it; with nothing declared, nothing is enforced and the
+run instead **records** which pre-existing files it modified — the earlier destruction was found only by
+diffing against git, so visibility is the floor.
+
+Verified that enforcement does not shift verdicts, three runs of `--demo` per configuration from a clean
+baseline: without `--owns` 2, 1, 2 steps; with `--owns` 1, 2, 1. Both settings produce both outcomes, so
+the 1-step runs are the stale-assembly false pass already recorded in §10 and not a regression from this
+change. Judging that from a single run would have misdiagnosed it.
+
+What ownership does **not** cover: deleting a member from a file the node legitimately owns. That is the
+surface-regression gate in §8.3 — **[now]**, landed as a separate change so a broken demo would stay
+attributable to one mechanism.
 
 The same machinery is reused for multi-session work (§7.3).
 
@@ -736,6 +809,82 @@ A deletion attempt is routed by §5.3 — trying to remove a member named in a c
 
 Same rule as §7.2 — **deciding a contract is wrong belongs neither to the consumer nor the owner,
 but to the layer above.**
+
+**[now] this is not a future concern — an unguarded run already destroyed a contract and the loop
+called it a success.** Measured in `Sample/Roguelike` slice 3, run with `--no-surface` (the same goal
+that elsewhere failed honestly at 4 steps):
+
+| | committed before the run | after the run |
+|---|---|---|
+| `Actor` | name, MaxHealth, CurrentHealth, IsAlive, TakeDamage, Heal, MoveTo, `Died` event, death latch | **X, Y, IsDead, SetPosition, Kill** |
+| `DungeonGrid` | `TileType` enum, `(w, h, seed)`, `TileAt`, `IsWalkable` | **enum gone, seed gone, `TileAt` gone, `SetWalkable` added** |
+| test count | 18 | **9** |
+
+Verdict printed: `✅ SUCCESS — applied and runtime-verified in 4 step(s)`, `19/19 tests passed`.
+
+The mechanism is worth stating exactly, because it is a hole in verification and not in the game code:
+
+1. Unable to resolve `Actor`/`DungeonGrid` (no `reads`, §2.2), the model **redefined them to match its own
+   assumptions** rather than adapt to theirs.
+2. The existing tests then failed, so it **rewrote the tests too**.
+3. Everything compiled and every remaining test passed, so the loop declared success.
+
+**"All tests pass" is measured against the tests that exist after the model's edits.** The model writes
+both the code and the tests, so it can always reach green by shrinking the contract. The suite cannot
+catch this — the suite is what got rewritten. Only `git` caught it, and only because the test count was
+compared. Losing `seed` silently deleted slice 1's determinism guarantee.
+
+Two consequences:
+
+- **This is the dangerous direction of error.** A false failure costs a step; a false pass ships a
+  regression while reporting success — the same asymmetry recorded for the stale-assembly anomaly in §10.
+- **Prompt-level prohibition is not enforcement.** The goal said, verbatim, *"Do NOT modify DungeonGrid
+  or Actor - use the members they already expose."* It was ignored. §3.2's `owns[]` is `[planned]`, and
+  `ApplyNode` therefore lets a node overwrite any file in the project. Delivering `reads` (§2.2) fixed
+  the starvation but does **not** close this: in the two runs with the surface delivered the contracts
+  happened to survive, which is an observation about two runs, not a guarantee.
+
+**[now] the gate exists** — [`SurfaceDiff`](../Orchestrator/Targets/SurfaceDiff.cs) +
+`DeletionGateNode` (`--deletion-gate`), running after Apply and before compile: the surface is read from
+source, so there is nothing to wait for, and the cheap check belongs first (§5.1). It is narrower than
+blanket path protection — a node that legitimately *extends* a neighbour still passes; only disappearance
+fails.
+
+Two design points, both forced by measurement rather than taste:
+
+- **Members are keyed by name + arity, not by full signature.** Keying on the signature would report a
+  renamed parameter (`int amount` → `int damage`) as a deletion and block legitimate work. Name + arity
+  still catches removal and arity changes. Commas inside `<>` or nested parens are not counted, or
+  `Dictionary<int,string> m` would read as two parameters.
+- **The baseline includes the test folder**, unlike the prompt digest. The first version read only runtime
+  sources and missed `ActorTests` shrinking from 10 methods to 8 — which is exactly the move that makes a
+  suite green after a member is deleted. Protecting the code without protecting its tests protects nothing.
+
+Measured, asking the loop to delete two public members and their tests:
+
+```
+②-b deletion → 9 public member(s) disappeared ❌
+      · Roguelike.Core.Actor.Died(0 arg)   · Roguelike.Core.Actor.Heal(1 arg)
+      · ActorTests.Heal_Increases_Health(0 arg)  · ActorTests.Died_Event_Raised_… (+4 more)
+②-b gate     → surface intact ✅  (7 type(s) checked)
+③ verify   → Test Runner passed ✅  27/27 tests passed
+```
+
+The feedback repaired it: told *by name* what had gone, the model put all nine back. Same pattern as
+`CS0246` versus `CS7036` in §2.2 — a message that names the missing thing converges, one that only
+reports absence does not.
+
+False positives, all five demos with the gate on: **0 fired**, and every demo reached its documented
+verdict (2 steps each), so §11's step-1 regression bar holds. That sweep is why the gate stays opt-in for
+now: it has been shown safe on five deterministic runs, not on the benchmark.
+
+**It also exposed a limit that is not the gate's fault.** The goal in that test asked to remove `Heal`
+and `Died`; the gate refused, the model restored them, everything then passed, and the loop printed
+`✅ SUCCESS` — for work that did not happen. **The loop's success criterion is "every verification node
+passed", not "the goal was achieved."** §8.3's routing says a refused deletion should travel *up* to the
+plan layer as "change the contract first"; with no plan layer built (§11 step 5) it dead-ends in a false
+success instead. This is the sharpest argument yet for §2.1's `doneCriterion` — a node without one cannot
+tell "done" from "gave up and passed the gates."
 
 ### 8.4 asmdef — let the compiler enforce it
 

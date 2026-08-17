@@ -57,6 +57,9 @@ public sealed class AgentLoop
     {
         new SkillCheckNode(),
         new ApplyNode(),
+        // 삭제 게이트는 Apply 뒤 · 컴파일 앞이다. 비교 대상은 디스크에 반영된 표면이어야 하고,
+        // 표면 추출은 소스 기반이라 컴파일을 기다릴 필요가 없다(싼 검사를 앞에 — §5.1).
+        new DeletionGateNode(),
         new VerifyCompileNode(),
         new VerifyRuntimeNode(),
         new VerifyPerfNode(),
@@ -70,7 +73,7 @@ public sealed class AgentLoop
             ? $"Skills: {string.Join(", ", _skills.Select(s => s.Name))} ({_skills.Sum(s => s.Checks.Count)} checks)"
             : "Skills: none (--skills off)");
 
-        var system = BuildSystemPrompt(_target, _skills);
+        var system = BuildSystemPrompt(_target, _skills, _options.Surface);
         var history = new List<Turn> { new(Role.User, BuildInitialPrompt(goal)) };
 
         var ctx = new RunContext
@@ -93,6 +96,9 @@ public sealed class AgentLoop
             _log($"  (context {Feedback.ApproxChars(system, sent.Select(t => t.Content)):N0} chars / {sent.Count} turns)");
 
             var genSpan = _trace?.Begin(SpanKind.Node, "Generate");
+            // 표면은 실행 내내 같으므로 한 번만 남긴다 — 사람이 "모델이 무엇을 알고 있었나"를 확인하는 증거다.
+            if (step == 1 && !string.IsNullOrWhiteSpace(_options.Surface))
+                genSpan?.Artifact("surface.txt", _options.Surface);
             var reply = await _backend.CompleteAsync(new AgentContext(system, sent), ct);
             history.Add(new Turn(Role.Assistant, reply.Text));
             _log($"① generate → {reply.Edits.Count} file edit(s)");
@@ -229,12 +235,15 @@ public sealed class AgentLoop
     /// 세 조각의 출처가 다르다는 게 설계의 핵심이다 — 형식은 루프, 내용은 손, 품질은 스킬.
     /// (`--print-prompt` 로 조립 결과를 그대로 볼 수 있다.)
     /// </summary>
-    public static string BuildSystemPrompt(IExecTarget target, IReadOnlyList<Skill> skills)
+    public static string BuildSystemPrompt(IExecTarget target, IReadOnlyList<Skill> skills, string? surface = null)
     {
         var guidance = SkillLibrary.BuildGuidance(skills);
         return FormatContract
              + "\n\n" + target.GenerationBrief
-             + (guidance.Length == 0 ? string.Empty : "\n\n" + guidance);
+             + (guidance.Length == 0 ? string.Empty : "\n\n" + guidance)
+             // 표면은 **마지막**이다. 형식·규격·품질 지침은 매 실행 동일하지만 이건 지금 이 프로젝트의
+             // 상태이고, 모델이 바로 다음에 읽는 것이 목표 문장이라 가장 가까이 두는 게 맞다.
+             + (string.IsNullOrWhiteSpace(surface) ? string.Empty : "\n\n" + surface);
     }
 
     // 목표만 전달한다. 어떤 언어로 어디에 만들지는 타깃의 GenerationBrief 가 이미 시스템 프롬프트에 넣었다.

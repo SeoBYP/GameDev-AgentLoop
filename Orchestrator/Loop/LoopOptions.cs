@@ -48,6 +48,41 @@ public sealed record LoopOptions
 
     /// <summary>검증에 임시 코드 실행(eval)을 허용할지. TestsOnly 면 테스트 파일로만 검증한다.</summary>
     public VerifyMode VerifyMode { get; init; } = VerifyMode.Auto;
+
+    /// <summary>
+    /// 프로젝트에 이미 있는 공개 표면 다이제스트(ARCHITECTURE §2.1 <c>reads[]</c>). 비면 주입하지 않는다.
+    ///
+    /// 히스토리 윈도우가 *과거 시도*에서 아낀 컨텍스트를 *프로젝트 상태*에 쓰는 자리다(§3.1 두 번째 행:
+    /// "스텝당 컨텍스트 — 전부 매번 vs 이 노드와 계약만"). 실측으로 필요성이 확인됐다:
+    /// 이게 없으면 앞선 노드의 타입을 참조해야 하는 노드가 네임스페이스를 추측해 4스텝 전부 실패했다.
+    /// </summary>
+    public string? Surface { get; init; }
+
+    /// <summary>
+    /// 이 노드가 **쓸 수 있는** 경로 glob (ARCHITECTURE §3.2 `owns[]`). 비면 강제하지 않는다.
+    ///
+    /// 비었을 때 강제하지 않는 건 타협이 아니라 측정 결과다 — 데모 5종이 쓰는 파일들이 이미
+    /// 레포에 있어서 "기존 파일 전면 보호"를 기본값으로 하면 회귀 기준이 깨진다.
+    /// 소유권은 추론 대상이 아니라 **선언 대상**이다(§2.1).
+    /// </summary>
+    public IReadOnlyList<string>? Owns { get; init; }
+
+    /// <summary>
+    /// 실행 시작 시점에 이미 있던 파일들(정규화된 상대경로). 소유권 선언이 없을 때
+    /// "기존 파일을 고쳤다"는 사실을 **기록**하는 데만 쓴다 — 판정은 바꾸지 않는다.
+    /// </summary>
+    public IReadOnlySet<string> PreExisting { get; init; } = new HashSet<string>();
+
+    /// <summary>
+    /// 삭제 게이트(§8.3)의 기준선 — 실행 시작 시점의 공개 표면. null 이면 게이트는 Skip 한다.
+    /// </summary>
+    public Targets.ProjectSurface? SurfaceBaseline { get; init; }
+
+    /// <summary>
+    /// 현재 표면을 다시 읽는 함수. 노드가 경로를 알 필요가 없게 주입한다
+    /// (record 의 값 동등성이 델리게이트 때문에 깨지지만, 여기에 의존하는 코드는 없다).
+    /// </summary>
+    public Func<Targets.ProjectSurface>? ReadSurface { get; init; }
 }
 
 /// <summary>루프 종료 판정 결과.</summary>

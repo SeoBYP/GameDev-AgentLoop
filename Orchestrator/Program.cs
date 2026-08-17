@@ -69,6 +69,55 @@ if (opts.ShowTraceOnly)
     return 0;
 }
 
+// 1-a3) 프로젝트에 **이미 있는** 공개 표면 (ARCHITECTURE §2.1 노드 튜플의 `reads[]`).
+//
+// 실측으로 확인된 필요성(Sample/Roguelike 슬라이스 3): 이게 없으면 앞선 노드의 타입을
+// 참조해야 하는 노드가 네임스페이스·멤버를 추측해 4스텝 전부 CS0246 으로 실패한다.
+// 그리고 그 에러는 "어디 있는지"를 말해주지 않아 피드백으로도 수리되지 않는다.
+//
+// **한 번만** 계산한다 — 실행 시작 시점의 상태가 곧 "이미 존재하는 것"의 정의이고,
+// 스텝마다 다시 읽으면 모델 자신이 방금 쓴(그리고 깨진) 파일이 다이제스트에 섞인다.
+var surfaceAll = opts.NoSurface ? ProjectSurface.Empty : ProjectSurface.Read(projectPath, layout);
+var surface = opts.NoSurface ? ProjectSurface.Empty : ProjectSurface.Read(projectPath, layout, opts.Reads);
+
+// 선언한 reads 를 해석할 수 없으면 **생성 전에 거부한다.** §3.2 가 소유권 충돌에 대해 정한 것과
+// 같은 논리다("나중보다 지금이 낫다"). 없는 정보는 피드백으로 만들어지지 않으므로,
+// 이걸 모델에 되먹이면 슬라이스 3처럼 스텝만 태운다.
+if (opts.Reads is { Count: > 0 })
+{
+    var missing = ProjectSurface.Unresolved(surfaceAll, opts.Reads);
+    if (missing.Count > 0)
+    {
+        Console.Error.WriteLine($"--reads did not resolve: {string.Join(", ", missing)}");
+        Console.Error.WriteLine(surfaceAll.IsEmpty
+            ? $"  → no public types found under {layout.ScriptDir}/."
+            : $"  → available: {string.Join(", ", surfaceAll.Types.Select(t => t.Name))}");
+        return 2;
+    }
+}
+
+var surfaceDigest = surface.ToDigest(layout.RuntimeAssembly);
+if (surfaceDigest.Length > 0)
+    Console.WriteLine($"Project surface: {surface.Types.Count} public type(s), {surfaceDigest.Length:N0} chars" +
+                      $"{(opts.Reads is { Count: > 0 } ? $" (reads: {string.Join(", ", opts.Reads)})" : "")}");
+else if (!opts.NoSurface)
+    Console.WriteLine("Project surface: none (nothing to read yet)");
+
+// 1-a4) 실행 시작 시점에 이미 있던 소스 파일들 — 소유권 선언이 없을 때 "기존 파일을 고쳤다"를
+//       기록하는 데만 쓴다(§3.2, Loop/Ownership.cs). 판정은 바꾸지 않는다.
+var preExisting = new HashSet<string>(StringComparer.Ordinal);
+foreach (var dir in new[] { layout.ScriptDir, layout.TestDir })
+{
+    var full = Path.Combine(projectPath, dir.Replace('/', Path.DirectorySeparatorChar));
+    if (!Directory.Exists(full))
+        continue;
+    foreach (var f in Directory.EnumerateFiles(full, "*.cs", SearchOption.AllDirectories))
+        preExisting.Add(Ownership.Key(Path.GetRelativePath(projectPath, f)));
+}
+
+if (opts.Owns is { Count: > 0 })
+    Console.WriteLine($"Ownership: {string.Join(", ", opts.Owns)}   (writes outside this fail before applying)");
+
 // 1-b) 도메인 스킬 로드 (Phase 3) — 포터블 마크다운이라 모든 백엔드에 동일하게 적용된다.
 //      스킬은 **오케스트레이터와 함께 배포**된다. 대상 프로젝트의 Skills/ 는 있으면 우선한다
 //      (남의 Unity 프로젝트를 가리켰을 때 조용히 0개가 되는 걸 막는다).
@@ -173,7 +222,7 @@ if (opts.PrintPrompt)
     Console.WriteLine($"# target: {target.Name}   runtime verification: {target.Supports(VerifyKind.RuntimeAssert)}");
     Console.WriteLine($"# skills: {(selectedSkills.Count == 0 ? "none" : string.Join(", ", selectedSkills.Select(s => s.Name)))}");
     Console.WriteLine(new string('─', 70));
-    Console.WriteLine(AgentLoop.BuildSystemPrompt(target, selectedSkills));
+    Console.WriteLine(AgentLoop.BuildSystemPrompt(target, selectedSkills, surfaceDigest));
     return 0;
 }
 
@@ -264,6 +313,14 @@ var loopOptions = new LoopOptions
     HistoryWindow = opts.HistoryWindow,
     VerifyMode = opts.TestsOnly ? VerifyMode.TestsOnly : VerifyMode.Auto,
     RunsDir = opts.RunsDir,
+    Surface = surfaceDigest,
+    Owns = opts.Owns,
+    PreExisting = preExisting,
+    // 삭제 게이트(§8.3) — 기준선은 **실행 시작 시점**의 표면이다. opt-in 인 이유는 오탐 검증 전이라서다.
+    // 게이트의 기준선은 **테스트까지 포함**한다. 프롬프트 다이제스트(런타임만)와 목적이 다르다 —
+    // 실측된 부정행위는 "멤버를 지우고 그 멤버를 쓰던 테스트도 지워 초록을 만드는 것"이었다.
+    SurfaceBaseline = opts.DeletionGate ? ProjectSurface.Read(projectPath, layout, includeTests: true) : null,
+    ReadSurface = opts.DeletionGate ? () => ProjectSurface.Read(projectPath, layout, includeTests: true) : null,
 };
 
 // 벤치마크 — 목표 세트를 통째로 돌려 비교 가능한 숫자를 만든다(ARCHITECTURE §10).
@@ -372,6 +429,14 @@ static Options ParseArgs(string[] args)
             case "--capture": o.Capture = true; break;
             case "--allow-unsafe-eval": o.AllowUnsafeEval = true; break;
             case "--tests-only": o.TestsOnly = true; break;
+            case "--no-surface": o.NoSurface = true; break;
+            case "--reads" when i + 1 < args.Length:
+                o.Reads = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                break;
+            case "--owns" when i + 1 < args.Length:
+                o.Owns = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                break;
+            case "--deletion-gate": o.DeletionGate = true; break;
             case "--history-window" when i + 1 < args.Length: o.HistoryWindow = int.Parse(args[++i]); break;
             case "--capture-dir" when i + 1 < args.Length: o.CaptureDir = args[++i]; o.Capture = true; break;
             case "--claude": o.Claude = true; break;
@@ -564,6 +629,19 @@ static class HelpText
           --target unity|ugs       Unity Editor (default) or UGS Cloud Code
           --project <path>         Unity project root (default: auto-detect, or UNITY_PROJECT_PATH)
 
+        NODE CONTRACT (what this node may read and write — ARCHITECTURE §2.1, §3.2)
+          --reads <a,b>            narrow the digest of existing types put in the prompt
+                                   (default: every public type under the script folder).
+                                   Without it a node that must call an earlier node's types has to
+                                   GUESS their namespace — measured: 4 steps, never converged
+          --owns <glob,glob>       paths this node may write. Anything else FAILS before being applied
+                                   (measured: a starved node rewrote its neighbours AND their tests,
+                                   then every remaining test passed and the loop reported success)
+          --deletion-gate          fail if public API that existed before this run disappears.
+                                   Catches what --owns cannot: deleting a member from a file the node
+                                   does own, then deleting the tests that used it
+          --no-surface             do not inject the digest — for measuring its effect
+
         VERIFICATION
           --assert <c#>            supply your own runtime check instead of letting the model write one
           --tests-only             verify only through compiled test files; never eval temp snippets
@@ -663,6 +741,18 @@ sealed class Options
     public string? UgsEnvironmentId { get; set; }
     public string? CloudCodeDir { get; set; }
     public string? ProjectPath { get; set; }
+
+    /// <summary>이 노드가 읽는 기존 타입(§2.1 `reads[]`). 비우면 런타임 표면 전체.</summary>
+    public IReadOnlyList<string>? Reads { get; set; }
+
+    /// <summary>표면 주입을 끈다 — 효과를 A/B 로 재기 위한 스위치.</summary>
+    public bool NoSurface { get; set; }
+
+    /// <summary>이 노드가 쓸 수 있는 경로 glob (§3.2 `owns[]`). 밖에 쓰면 적용 전에 반려한다.</summary>
+    public IReadOnlyList<string>? Owns { get; set; }
+
+    /// <summary>실행 전에 있던 public 표면이 사라지면 반려한다(§8.3). 오탐 검증 전이라 opt-in.</summary>
+    public bool DeletionGate { get; set; }
     // 백엔드별 기본값이 달라 nullable(ApiBackend→claude-opus-5, ClaudeCodeBackend→sonnet).
     public string? Model { get; set; } = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL");
 }

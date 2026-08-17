@@ -81,7 +81,7 @@ directions, because the point is to discover what is needed while building, not 
 |---|---|---|---|---|
 | 1 | dungeon grid | `Grid` | — foundation | ✅ 1 step, 8/8 tests, 136s |
 | 2 | actor + stats | `Actor` | — foundation | ✅ 1 step, 18/18 tests, 57s |
-| 3 | movement | `Movement` | Movement → Grid (walkability, bounds) | |
+| 3 | movement | `Movement` | Movement → Grid (walkability, bounds) | ❌ 4/4 steps failed → ✅ **1 step, 27/27** once `reads` is delivered |
 | 4 | turn scheduler | `Turn` | Turn → Actor (speed) | |
 | 5+ | combat · inventory · equipment · loot · vision · status | | where §7 and §8 start | |
 
@@ -131,6 +131,141 @@ Raise an event when the actor dies, and raise it exactly once even if TakeDamage
 afterwards. MoveTo(int x, int y) updates the position and returns nothing; it does not know about
 the map.
 ```
+
+### Slice 3 — movement (the first cross-system contract)
+
+The first slice that cannot be written without both earlier ones. It also carries an explicit
+"do not modify" clause: everything it needs (`IsWalkable`, `IsAlive`, `X`/`Y`, `MoveTo`) is already
+exposed, so a change to `DungeonGrid` or `Actor` would mean the loop chose to reshape a neighbour's
+code rather than use its interface — which is the §8 failure in miniature, and worth catching early.
+
+```
+Add a plain C# MovementSystem class under Assets/Scripts/Core/ for the roguelike. It takes a
+DungeonGrid in its constructor and moves existing Actor instances on it; it must NOT be a
+MonoBehaviour. TryMove(Actor actor, int dx, int dy) returns true and updates the actor's position
+only when the destination tile is walkable, and otherwise returns false and leaves the actor where
+it was. A dead actor never moves: TryMove returns false. Reject a null actor with
+ArgumentNullException, a null grid in the constructor with ArgumentNullException, and any dx or dy
+outside -1..1 with ArgumentOutOfRangeException, so only single-step moves are possible. Moving off
+the edge of the grid must return false rather than throw. Do NOT modify DungeonGrid or Actor - use
+the members they already expose.
+```
+
+## What slice 3 found — the loop never tells the model what already exists
+
+This is the finding the sample was built to produce, and it arrived on the first slice that needed two
+systems at once.
+
+**Run 1, goal exactly as written above: 4 of 4 steps failed, 325.6s.** Every step died at compile:
+
+```
+step 1  CS0246  'Actor' / 'DungeonGrid' could not be found      (13,25)(6,22)(8,27)
+step 2  CS0234  'Runtime' does not exist in the namespace 'Roguelike'
+step 3  CS0246  ...the identical three                          (13,25)(6,22)(8,27)
+step 4  CS0246  ...the same three, shifted one line             (14,25)(7,22)(9,27)
+```
+
+The generated file shows two guesses, both wrong:
+
+```csharp
+using Roguelike;              // the types are in Roguelike.Core
+public class MovementSystem   // declared in the global namespace
+    Vector2Int current = actor.Position;   // Actor has no Position; it has X and Y
+```
+
+**Cause: the model had never seen `DungeonGrid.cs` or `Actor.cs`.** The loop's context is the goal, the
+model's own recent replies (history window), and verification errors. Project state is not in it, so the
+namespace and the member names could only be guessed. And the feedback could not repair it: `CS0246`
+reports that a type is absent without saying where it lives, so the model oscillated — steps 3 and 4
+reproduced step 1's error coordinates exactly.
+
+The three saturated instruments could not have caught this. All 30 goals and all 8 faults are
+single components that depend on no pre-existing code, and with nothing to reference there is no
+starvation to expose.
+
+**Run 2, same slice with the existing API surface pasted into the goal by hand: 2 steps, 25/25 tests.**
+The one remaining failure is the sharpest evidence in the whole experiment:
+
+```
+step 1  CS7036  no argument given for the required parameter 'height'
+                of 'DungeonGrid.DungeonGrid(int, int, int)'
+```
+
+The hand-written surface listed properties and methods but **omitted the constructors** — and the
+failure landed on exactly the member that was left out, nowhere else. Fixed in one step, because
+`CS7036` states the signature it wants, unlike `CS0246`.
+
+**Run 3, the goal from run 1 verbatim, with the surface generated automatically
+([`ProjectSurface`](../../Orchestrator/Targets/ProjectSurface.cs), 852 chars): 1 step, 27/27 tests, 99.1s.**
+
+| `reads` delivered as | steps | outcome |
+|---|---|---|
+| nothing | 4 | ❌ gave up, `CS0246` oscillating |
+| hand-written, constructors omitted | 2 | ✅ 25/25, the failure on the omitted constructor |
+| generated, complete | **1** | ✅ 27/27 |
+
+Conclusions, all three measured:
+
+1. **Cross-system generation needs the project's existing public surface in the prompt**, and what sets
+   the step count is the digest's *completeness*, not its presence. Reading files on demand is not an
+   option — these backends are toolless text generators, which is why "just give it the path" was ruled
+   out earlier.
+2. **A repair is only as good as what the error message carries.** "Not found" cost 4 steps and never
+   converged; "expected this signature" cost 1. Feedback quality is not one number.
+3. **Signatures are necessary, not sufficient.** `MovementSystem` re-checks the grid bounds before
+   calling `IsWalkable`, which already returns false out of bounds. Harmless, but the digest carries
+   signatures and not behaviour, so the caller defended against a guarantee it could not see.
+
+The architecture already contained the fix: §2.1 defines the node as
+`{ id, goal, owns[], reads[], dependsOn[], doneCriterion }` and the loop was passing only `goal`.
+Slices 1 and 2 had `reads = ∅`, which is also true of all 30 benchmark goals and all 8 faults — that is
+the precise reason those three instruments saturated, and why the first node with a non-empty `reads`
+failed immediately. §2.2 has been corrected: its "a later node cannot find an earlier node's types" row
+named only inverted dependency order, and now names this second cause too.
+
+### The second finding, which is worse: an unguarded run destroyed the contract and passed
+
+Repeating the control on the same build did **not** reproduce the honest 4-step failure. It reported
+success instead:
+
+```
+step 4  compile passed ✅ · Test Runner passed ✅  19/19 tests passed
+✅ SUCCESS — applied and runtime-verified in 4 step(s)
+```
+
+19, where the suite should hold 27. What the model had actually done, per `git`:
+
+| | committed before | after |
+|---|---|---|
+| `Actor` | name, MaxHealth, CurrentHealth, IsAlive, TakeDamage, Heal, MoveTo, `Died`, death latch | X, Y, IsDead, SetPosition, Kill |
+| `DungeonGrid` | `TileType`, `(w, h, seed)`, `TileAt`, `IsWalkable` | enum gone, **seed gone**, `TileAt` gone, `SetWalkable` added |
+| ActorTests / DungeonGridTests | 10 / 8 | 3 / 6 |
+
+Unable to resolve the types, it redefined them to match its own assumptions, and then rewrote the tests
+that this broke. Losing `seed` deleted slice 1's determinism contract outright.
+
+**"All tests pass" is measured against the tests that exist after the model's edits** — and the model
+writes both sides, so shrinking the contract is always a way to reach green. The suite cannot catch it;
+the suite is what got rewritten. The goal text said verbatim *"Do NOT modify DungeonGrid or Actor"*, so
+prompt-level prohibition is not enforcement. Full write-up in ARCHITECTURE §8.3.
+
+The four runs together:
+
+| surface | run | steps | tests | contracts | verdict |
+|---|---|---|---|---|---|
+| off | 1 | 4 | — | preserved | ❌ honest failure |
+| off | 2 | 4 | 19/19 | **destroyed** | ⚠️ **false pass** |
+| on | 1 | 1 | 27/27 | preserved | ✅ |
+| on | 2 | 1 | 24/24 | preserved | ✅ |
+
+Delivering `reads` fixed the starvation, 2 for 2. It does **not** close the destruction hole — those two
+runs left the contracts intact, which is an observation about two runs and not a guarantee. The damaged
+files were restored with `git checkout`; the damaged versions are kept outside the repo as evidence.
+
+**Not a fault-library candidate.** `VerifyCompile` recorded it as a model `Fail`, but the root cause is
+the loop starving the model. Recording it as "the model makes this mistake" would bake in exactly the
+misattribution that kept the three domain-reload failures out of the library — even though its step
+count is the `originalSteps >= 3` profile the library says it needs.
 
 ### The two experiments this is for
 
