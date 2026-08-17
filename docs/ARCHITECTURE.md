@@ -914,12 +914,29 @@ Benchmark/results/<id>/summary.json  # tracked — the numbers
   recompiles, so each goal starts from a clean project
 - Record a baseline first; every later improvement is stated **against the held-out set only**
 
-**[unmeasured]** the baseline itself. A full sweep needs a live editor and a real backend
-(~4 minutes per goal, measured on `cooldown-timer`), so it is a deliberate, ~90-minute run.
+### The baseline — recorded `20260817-121624`
+
+**[now]** `claude-code:sonnet`, `--max-steps 6`, all three skills, correctness only, 18 goals in ~30 min.
+
+| Split | Passed | Mean steps | Mean wall clock |
+|---|---|---|---|
+| **holdout** | **6/6 (100%)** | **1.33** | 141.4s |
+| train | 12/12 (100%) | 1.17 | 80.0s |
+
+Four goals needed a repair step, and every one was a **real defect the loop caught** — three failing
+test suites and one domain-rule violation rejected before it was applied. **Zero infrastructure
+failures across all 18 goals**, which is the first sweep where that held: the previous attempt was
+stopped at 2/18 because a domain-reload race was being blamed on the model (§9.4).
+
+**What this baseline cannot show.** At 100% there is no headroom on success rate — only a regression
+would move it. And 14 of 18 goals were one-shot, so the whole mean-steps range sits between 1.00 and
+1.22. That is a thin signal. If a later change needs to prove itself, the honest fix is **harder
+goals**, not a softer reading of these numbers. Until then this is a regression guard, not a
+progress meter.
 
 The shape of the sentence to aim for:
 
-> Held-out, 20 goals: 3.4 steps on average → **1.9 steps** after skill distillation; success rate 70% → 90%
+> Held-out: 1.33 steps on average → **1.10** after skill distillation
 
 The benchmark is also required by the outer loop (§2) — you need to compare
 **agent decomposition vs. human decomposition** before claiming the outer loop pays off.
@@ -931,7 +948,7 @@ The benchmark is also required by the outer loop (§2) — you need to compare
 | | Step | Why here |
 |---|---|---|
 | 0 | ~~**RunStore + span trace**~~ **[done]** | picking up material that used to be thrown away daily. Prerequisite for everything after |
-| 0 | **Benchmark** ~~(harness)~~ **[done]** · baseline still to record | without it, no later improvement is measurable |
+| 0 | ~~**Benchmark + baseline**~~ **[done]** | without it, no later improvement is measurable. Baseline `20260817-121624`: holdout 6/6, 1.33 steps |
 | 1 | **Extract nodes** | regression bar: the five demos must reach the **same verdicts** |
 | 2 | **Declared graph + policy** | targets declare their own subgraph; absorbs the scattered `Supports` branching |
 | 3 | **RED gate + TDD cycle** (§4) | blocks vacuous tests. Sits directly on the node contract |

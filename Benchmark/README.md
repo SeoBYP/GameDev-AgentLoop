@@ -42,6 +42,40 @@ span traces to `.agentloop/bench/<benchId>/` (ignored — working data).
 
 A baseline must be recorded **before** the loop changes, otherwise later comparison is meaningless.
 
+### Baseline — `20260817-121624`
+
+Backend `claude-code:sonnet`, `--max-steps 6`, all three skills, correctness verification only
+(no performance budget — see [ARCHITECTURE §9.4](../docs/ARCHITECTURE.md)).
+
+| Split | Passed | Mean steps | Mean wall clock |
+|---|---|---|---|
+| **holdout** | **6/6 (100%)** | **1.33** | 141.4s |
+| train | 12/12 (100%) | 1.17 | 80.0s |
+| all | 18/18 (100%) | 1.22 | 100.5s |
+
+Four goals needed a repair step, and **every one of them was a real defect the loop caught** —
+no infrastructure noise in the whole sweep:
+
+| Goal | What failed on step 1 | Caught by |
+|---|---|---|
+| `damage-over-time` | 4/5 tests passed | Test Runner |
+| `grid-spawner` | 6/7 tests passed | Test Runner |
+| `wave-spawner` | 5/6 tests passed | Test Runner |
+| `inventory-stack` | domain rule violation | static skill check, **before applying** |
+
+### What this baseline can and cannot show
+
+**It cannot show a success-rate improvement.** At 100% there is no headroom; only a *regression*
+would move that number. That is useful as a guard, but it means the goal set is not currently hard
+enough to prove the loop got better at succeeding.
+
+**The signal that remains is mean steps**, and it is thin — 14 of 18 goals were one-shot, so the
+whole measurable range sits between 1.00 and 1.22. A change would have to be substantial to clear
+the noise.
+
+If future work needs a sharper instrument, the honest fix is **harder goals**, not a reinterpretation
+of these numbers. Until then, treat this baseline as a regression guard rather than a progress meter.
+
 ## Run it against the sandbox, not your project
 
 `Sandbox/` is a separate, empty Unity project that exists only for benchmarking. **Do not run the

@@ -1,0 +1,272 @@
+{
+  "BenchId": "20260817-121624",
+  "StartedAt": "2026-08-17T12:16:26.5428764\u002B09:00",
+  "Backend": "claude-code:sonnet",
+  "Target": "unity:6000.5.4f1",
+  "MaxSteps": 6,
+  "Skills": [
+    "client-architecture",
+    "unity-performance",
+    "unity-pitfalls"
+  ],
+  "Results": [
+    {
+      "Id": "health-clamp",
+      "Set": "train",
+      "Tags": [
+        "logic",
+        "bounds"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 36550,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-121626"
+    },
+    {
+      "Id": "cooldown-timer",
+      "Set": "train",
+      "Tags": [
+        "logic",
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 31919,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-121704"
+    },
+    {
+      "Id": "stamina-regen",
+      "Set": "train",
+      "Tags": [
+        "logic",
+        "frames",
+        "bounds"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 74008,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-121738"
+    },
+    {
+      "Id": "move-to-target",
+      "Set": "train",
+      "Tags": [
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 76227,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-121853"
+    },
+    {
+      "Id": "score-tracker",
+      "Set": "train",
+      "Tags": [
+        "perf",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 44703,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-122011"
+    },
+    {
+      "Id": "object-pool",
+      "Set": "train",
+      "Tags": [
+        "perf",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 98108,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-122057"
+    },
+    {
+      "Id": "respawn-timer",
+      "Set": "train",
+      "Tags": [
+        "logic",
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 54573,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-122237"
+    },
+    {
+      "Id": "damage-over-time",
+      "Set": "train",
+      "Tags": [
+        "logic",
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 176011,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-122333"
+    },
+    {
+      "Id": "buff-stack",
+      "Set": "train",
+      "Tags": [
+        "logic",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 74779,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-122630"
+    },
+    {
+      "Id": "camera-follow",
+      "Set": "train",
+      "Tags": [
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 34575,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-122747"
+    },
+    {
+      "Id": "grid-spawner",
+      "Set": "train",
+      "Tags": [
+        "render",
+        "perf"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 184088,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-122823"
+    },
+    {
+      "Id": "jump-input",
+      "Set": "train",
+      "Tags": [
+        "input",
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 74955,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-123128"
+    },
+    {
+      "Id": "inventory-stack",
+      "Set": "holdout",
+      "Tags": [
+        "logic",
+        "collections",
+        "bounds"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 102068,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-123245"
+    },
+    {
+      "Id": "state-machine",
+      "Set": "holdout",
+      "Tags": [
+        "logic"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 39500,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-123429"
+    },
+    {
+      "Id": "wave-spawner",
+      "Set": "holdout",
+      "Tags": [
+        "frames",
+        "render"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 394509,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-123510"
+    },
+    {
+      "Id": "nearest-target",
+      "Set": "holdout",
+      "Tags": [
+        "perf",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 57445,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-124146"
+    },
+    {
+      "Id": "projectile-pool",
+      "Set": "holdout",
+      "Tags": [
+        "perf",
+        "render",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 199593,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-124245"
+    },
+    {
+      "Id": "move-input",
+      "Set": "holdout",
+      "Tags": [
+        "input",
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 55157,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-124606"
+    }
+  ],
+  "All": {
+    "Set": "all",
+    "Total": 18,
+    "Passed": 18,
+    "SuccessRate": 100,
+    "MeanSteps": 1.22,
+    "MeanWallClockMs": 100487
+  },
+  "Train": {
+    "Set": "train",
+    "Total": 12,
+    "Passed": 12,
+    "SuccessRate": 100,
+    "MeanSteps": 1.17,
+    "MeanWallClockMs": 80041
+  },
+  "Holdout": {
+    "Set": "holdout",
+    "Total": 6,
+    "Passed": 6,
+    "SuccessRate": 100,
+    "MeanSteps": 1.33,
+    "MeanWallClockMs": 141379
+  }
+}
