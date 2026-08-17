@@ -74,6 +74,23 @@ jobs:
           dotnet run --project Orchestrator -c Release --no-build -- \
             --show-trace --project /tmp/bare --runs-dir /tmp/runs
 
+      # A relative --project was passed verbatim as BOTH the child process's working directory
+      # AND `unity command --project-path`, so it applied twice and every editor call died with
+      # "Not a Unity project: <path>/<path>". The default project root was already absolute, so
+      # only the form the docs told people to use (`--project Benchmark/Sandbox`) was broken.
+      # No editor is needed to catch it — assert the resolved root came out absolute.
+      # Do NOT pass --runs-dir here: an explicit absolute runs dir would make this vacuous.
+      - name: A relative --project resolves to an absolute root
+        run: |
+          mkdir -p /tmp/rel/Assets/Scripts /tmp/rel/ProjectSettings
+          echo "m_EditorVersion: 6000.0.30f1" > /tmp/rel/ProjectSettings/ProjectVersion.txt
+          cd /tmp
+          out=$(dotnet run --project "$GITHUB_WORKSPACE/Orchestrator" -c Release --no-build -- \
+                  --demo --project rel 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "run: /" \
+            || { echo "::error::a relative --project was not normalised to an absolute path"; exit 1; }
+
       # The benchmark cannot run here (no editor), but a malformed goals.jsonl would only
       # surface at the start of a 90-minute sweep. Parse it now.
       - name: Benchmark goals parse

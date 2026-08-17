@@ -47,11 +47,13 @@ Assets/Tests/PlayMode/   Roguelike.Tests — [Test] for Core, [UnityTest] only f
 Rules live in `Core` because that is what the contracts are between, and because `[Test]` needs no
 frames — verification stays fast and honest. A driver that contains a rule is a bug.
 
-**[unmeasured]** whether the model honours this. `UnityEditorTarget.GenerationBrief` is written for
-MonoBehaviour components (`new GameObject()` + `AddComponent<T>()`, `[SerializeField]`), so it may
-push generation the other way, and `AddComponent<T>()` on a plain class does not compile. If that
-happens the compile node will catch it and the repair cost is the measurement. Do not pre-emptively
-soften the brief — find out first.
+**[now] the model honours it, and the prediction that it would not was wrong.** The brief is written
+for MonoBehaviour components (`new GameObject()` + `AddComponent<T>()`, `[SerializeField]`), so slice 1
+was expected to emit `AddComponent<DungeonGrid>()` and fail to compile, with the repair cost as the
+measurement. It did not happen: the model wrote a plain class in `namespace Roguelike.Core` and
+constructed it directly in the tests. **One step, compile ✅, 8/8 tests ✅.** So the brief's component
+idiom is read as an example, not a mandate, and no softening was needed — which is the reason for not
+softening it in advance.
 
 ## Setup
 
@@ -75,13 +77,35 @@ dotnet run --project Orchestrator -- --claude --project Sample/Roguelike "<goal 
 Small steps, in order. Each slice is one loop run. Only the next few are written out — the rest are
 directions, because the point is to discover what is needed while building, not to plan it up front.
 
-| # | slice | new system | contract it creates |
-|---|---|---|---|
-| 1 | dungeon grid | `Grid` | — foundation |
-| 2 | actor + stats | `Actor` | — foundation |
-| 3 | movement | `Movement` | Movement → Grid (walkability, bounds) |
-| 4 | turn scheduler | `Turn` | Turn → Actor (speed) |
-| 5+ | combat · inventory · equipment · loot · vision · status | | where §7 and §8 start |
+| # | slice | new system | contract it creates | recorded |
+|---|---|---|---|---|
+| 1 | dungeon grid | `Grid` | — foundation | ✅ 1 step, 8/8 tests, 136s |
+| 2 | actor + stats | `Actor` | — foundation | ✅ 1 step, 18/18 tests, 57s |
+| 3 | movement | `Movement` | Movement → Grid (walkability, bounds) | |
+| 4 | turn scheduler | `Turn` | Turn → Actor (speed) | |
+| 5+ | combat · inventory · equipment · loot · vision · status | | where §7 and §8 start | |
+
+The isolation rationale checks out on the first run: verification reported `8/8 tests passed`, i.e. only
+this project's tests. In the main project the Test Runner would also have run AgentLoop's own 13 input
+smoke tests on every game verification.
+
+Slice 2 reported `18/18` — its own 10 plus slice 1's 8. The suite accumulates, so every later slice is
+verified against every earlier contract. That accumulation is the substrate for §8: it is also what
+will make removing anything expensive.
+
+### Debt left on purpose, recorded not fixed
+
+Both are correct against the goal that was asked. Neither is fixed here, because the point is to find
+out whether the loop notices them when a later slice collides — and a debt fixed pre-emptively teaches
+nothing.
+
+- **slice 1 — connectivity.** Floor tiles are placed independently, so a grid can contain unreachable
+  pockets. Connectivity was never asked for. Movement (slice 3) and any pathing will collide with it.
+- **slice 2 — revive is silent.** `Died` is latched by a `_hasDied` flag, so it fires exactly once as
+  specified. But `Heal` can raise a dead actor's health above zero, making `IsAlive` true again while
+  the latch stays set — a second death then raises nothing. Literally correct, and untested: the
+  generated suite has `Died_Event_Raised_Exactly_Once_On_Repeated_Lethal_Damage` but no revive case.
+  Status effects and combat are where this will surface.
 
 ### Slice 1 — dungeon grid
 

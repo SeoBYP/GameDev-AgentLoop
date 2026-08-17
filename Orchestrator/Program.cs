@@ -35,6 +35,14 @@ if (projectPath is null || !Directory.Exists(Path.Combine(projectPath, "Assets")
     return 2;
 }
 
+// 여기서 **절대 경로로 고정한다.** 상대 경로를 그대로 흘리면 `unity command` 호출이 깨진다:
+// RunCommandAsync 가 같은 값을 자식 프로세스의 workingDir 과 `--project-path` 양쪽에 쓰기 때문에,
+// `--project Sample/Roguelike` 는 `Sample/Roguelike/Sample/Roguelike` 로 두 번 적용된다
+// (실측: "Not a Unity project: ...\Sample\Roguelike\Sample\Roguelike").
+// 기본 경로(FindUnityProjectRoot)는 이미 절대라서 여태 안 드러났고, --project/UNITY_PROJECT_PATH
+// 로 상대 경로를 준 사람만 맞는 함정이었다 — 즉 문서가 안내한 그 형태.
+projectPath = Path.GetFullPath(projectPath);
+
 // 1-a) .env 로드 — 자격 증명을 OS 전역이 아닌 레포 루트 파일로 관리한다(.gitignore 로 보호됨).
 //      여기서 올린 값은 자식 프로세스(`ugs`/`claude`/`codex`)에도 그대로 상속된다.
 var envFile = opts.EnvFile ?? Path.Combine(projectPath, ".env");
