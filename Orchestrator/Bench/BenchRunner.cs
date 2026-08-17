@@ -40,9 +40,14 @@ public sealed class BenchRunner
         _template = template;
     }
 
+    /// <param name="backendFor">
+    /// 목표별 백엔드. 결함 주입은 목표마다 **첫 응답이 다르므로** 하나의 백엔드로는 안 된다.
+    /// 넘기지 않으면 생성자에 받은 백엔드를 그대로 쓴다.
+    /// </param>
     public async Task<BenchSummary> RunAsync(
         IReadOnlyList<BenchGoal> goals, string benchId, string runsRoot,
-        string? model, string tier, CancellationToken ct)
+        string? model, string tier, CancellationToken ct,
+        Func<BenchGoal, IAgentBackend>? backendFor = null)
     {
         var results = new List<BenchResult>();
         var startedAt = DateTime.Now;
@@ -57,17 +62,20 @@ public sealed class BenchRunner
             Console.WriteLine(new string('─', 78));
 
             var before = Snapshot();
-            var store = RunStore.Create(_projectPath, Path.Combine(runsRoot, g.Id), DateTime.Now);
+            var goalStartedAt = DateTime.Now;
+            var store = RunStore.Create(_projectPath, Path.Combine(runsRoot, g.Id), goalStartedAt);
             var wall = System.Diagnostics.Stopwatch.StartNew();
 
             bool success = false;
             int steps = 0;
             string summary;
 
+            var backend = backendFor?.Invoke(g) ?? _backend;
+
             try
             {
                 var trace = new RunTrace(store);
-                var loop = new AgentLoop(_backend, _target, _template, _skills, trace: trace);
+                var loop = new AgentLoop(backend, _target, _template, _skills, trace: trace);
 
                 using (var runSpan = trace.Begin(SpanKind.Run, g.Goal))
                 {
@@ -87,6 +95,26 @@ public sealed class BenchRunner
             }
 
             wall.Stop();
+
+            // 목표별 실행에도 매니페스트를 남긴다 — 트레이스만 있으면 "그때 무엇이 적용됐는지"를
+            // 사후에 알 수 없다(결함 라이브러리 추출이 이걸 필요로 한다).
+            store.WriteManifest(new RunManifest(
+                RunId: store.RunId,
+                StartedAt: goalStartedAt.ToString("o"),
+                Goal: g.Goal,
+                Backend: backend.Name,
+                Target: _target.Name,
+                Model: model,
+                MaxSteps: _template.MaxSteps,
+                VerifyMode: _template.VerifyMode.ToString(),
+                HistoryWindow: _template.HistoryWindow,
+                Skills: _skills.Select(s => s.Name).ToList(),
+                ProjectLayout: _layout.Describe(),
+                Success: success,
+                Steps: steps,
+                Summary: summary,
+                WallClockMs: Math.Round(wall.Elapsed.TotalMilliseconds, 0)));
+
             results.Add(new BenchResult(
                 g.Id, g.Set, g.Tier, g.Tags, success, steps,
                 Math.Round(wall.Elapsed.TotalMilliseconds, 0), summary, store.RunId));

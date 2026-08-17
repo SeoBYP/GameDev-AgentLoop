@@ -1,0 +1,208 @@
+{
+  "BenchId": "20260817-140030",
+  "StartedAt": "2026-08-17T14:00:30.4333037\u002B09:00",
+  "Backend": "claude-code:sonnet",
+  "Target": "unity:6000.5.4f1",
+  "MaxSteps": 6,
+  "Tier": "hard",
+  "Skills": [
+    "client-architecture",
+    "unity-performance",
+    "unity-pitfalls"
+  ],
+  "Results": [
+    {
+      "Id": "buff-while-disabled",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "unity-trap",
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 100065,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-140030"
+    },
+    {
+      "Id": "death-event-once",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "unity-trap",
+        "logic"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 88389,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-140212"
+    },
+    {
+      "Id": "fixed-step-mover",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "unity-trap",
+        "frames"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 78675,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-140341"
+    },
+    {
+      "Id": "charge-ability",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "timing",
+        "logic"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 90275,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-140502"
+    },
+    {
+      "Id": "pool-double-release",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "defensive",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 143179,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-140634"
+    },
+    {
+      "Id": "equip-slots",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "interaction",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 129969,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-140858"
+    },
+    {
+      "Id": "stable-priority-queue",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "ordering",
+        "collections"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 173586,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-141110"
+    },
+    {
+      "Id": "combo-window",
+      "Set": "train",
+      "Tier": "hard",
+      "Tags": [
+        "timing",
+        "logic"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 123640,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-141405"
+    },
+    {
+      "Id": "shield-overflow",
+      "Set": "holdout",
+      "Tier": "hard",
+      "Tags": [
+        "interaction",
+        "bounds"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 121664,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-141610"
+    },
+    {
+      "Id": "seeded-loot",
+      "Set": "holdout",
+      "Tier": "hard",
+      "Tags": [
+        "determinism",
+        "logic"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 77350,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-141813"
+    },
+    {
+      "Id": "cooldown-on-disable",
+      "Set": "holdout",
+      "Tier": "hard",
+      "Tags": [
+        "unity-trap",
+        "timing"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 115995,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-141932"
+    },
+    {
+      "Id": "grid-path",
+      "Set": "holdout",
+      "Tier": "hard",
+      "Tags": [
+        "ordering",
+        "collections",
+        "perf"
+      ],
+      "Success": true,
+      "Steps": 1,
+      "WallClockMs": 144338,
+      "Summary": "applied and runtime-verified in 1 step(s)",
+      "RunId": "20260817-142130"
+    }
+  ],
+  "All": {
+    "Set": "all",
+    "Total": 12,
+    "Passed": 12,
+    "SuccessRate": 100,
+    "MeanSteps": 1,
+    "MeanWallClockMs": 115594
+  },
+  "Train": {
+    "Set": "train",
+    "Total": 8,
+    "Passed": 8,
+    "SuccessRate": 100,
+    "MeanSteps": 1,
+    "MeanWallClockMs": 115972
+  },
+  "Holdout": {
+    "Set": "holdout",
+    "Total": 4,
+    "Passed": 4,
+    "SuccessRate": 100,
+    "MeanSteps": 1,
+    "MeanWallClockMs": 114837
+  }
+}

@@ -930,9 +930,54 @@ stopped at 2/18 because a domain-reload race was being blamed on the model (§9.
 
 **What this baseline cannot show.** At 100% there is no headroom on success rate — only a regression
 would move it. And 14 of 18 goals were one-shot, so the whole mean-steps range sits between 1.00 and
-1.22. That is a thin signal. If a later change needs to prove itself, the honest fix is **harder
-goals**, not a softer reading of these numbers. Until then this is a regression guard, not a
-progress meter.
+1.22. That is a thin signal — a regression guard, not a progress meter.
+
+### Harder goals did not fix it — measured
+
+**[now]** A `hard` tier of 12 goals was written to be difficult, aimed squarely at traps the model
+was expected to fall into (coroutines stopping on disable, event idempotence, `FixedUpdate` timing).
+Result: **12/12 one-shot, mean 1.00** — *worse* headroom than the easy tier.
+
+Re-running the loop unchanged also showed the noise directly: two runs of behavior-equivalent code
+gave `all` 1.22 ↔ 1.44 and holdout 1.33 ↔ 1.17, with 9 of 18 goals changing step count in **both
+directions**. The run-to-run swing (0.22) is most of the entire theoretical headroom (0.33). So even
+a perfect loop could not demonstrate improvement this way.
+
+The diagnosis is not "the goals are too easy" but something sharper: **this measures the model, not
+the loop.** The loop only does work when something is wrong, and a capable model is usually not wrong.
+
+### Fault injection — measure repair, because repair is the product
+
+**[now]** `Benchmark/faults/*.json` stores first responses that **really failed verification**.
+`--bench-faults` replays one as step 1; the real model takes over from step 2.
+
+```
+step 1   replay a stored faulty response   → verification fails, as it originally did
+step 2+  the real model repairs it         → step count measures THE LOOP
+```
+
+Why this is the right instrument:
+
+| | goal benchmark | fault injection |
+|---|---|---|
+| measures | does the model one-shot it | **how fast the loop repairs** |
+| loop's contribution | almost none | all of it |
+| starting point | different every run | **fixed** |
+| improvements that register | few | better feedback, better skills, best-of-N |
+
+**Faults are recorded, never invented** — the same rule as skill checks, for the same reason: picked
+difficulty was wrong three times in one day. Infrastructure failures are excluded: three candidates
+were dropped because a domain-reload race, not the model, caused them (§9.4). Including those would
+have baked a misattribution into the library, and they would not reproduce anyway.
+
+The current library covers all three verification layers — 2 static, 1 compile, 5 runtime — and the
+sample game's real failures will feed it, so the loop ends up producing its own regression tests.
+
+**[unmeasured]** the repair baseline itself. One fault (`damage-over-time`) has been replayed
+end-to-end and reproduced correctly; the full sweep has not been recorded yet.
+
+Note what this does **not** measure: prevention. A skill's value is that the bad code never appears,
+and injecting the fault bypasses that. Prevention stays on the goal benchmark's violation rate.
 
 The shape of the sentence to aim for:
 

@@ -89,7 +89,7 @@ if (opts.ListSkills)
 //       90분짜리 실행이 시작 직후 죽는 것도 막는다.
 IReadOnlyList<BenchGoal>? benchGoals = null;
 string? benchGoalsPath = null;
-if (opts.Bench)
+if (opts.Bench && !opts.BenchFaults)
 {
     var goalsPath = opts.BenchGoals ?? ResolveBenchGoals(projectPath);
     benchGoalsPath = goalsPath;
@@ -111,6 +111,26 @@ if (opts.Bench)
         Console.Error.WriteLine("No goals matched the filter.");
         return 2;
     }
+}
+
+// 1-b3) 결함 라이브러리 — 저장된 "실패한 첫 응답"으로 **수리 능력**을 잰다(§10).
+IReadOnlyList<BenchFault>? benchFaults = null;
+if (opts.BenchFaults)
+{
+    var faultsDir = opts.FaultsDir
+        ?? Path.Combine(Path.GetDirectoryName(benchGoalsPath ?? ResolveBenchGoals(projectPath) ?? ".")!, "faults");
+    benchFaults = BenchFault.Load(faultsDir)
+        .Where(f => opts.BenchSet is null or "all" || f.Set.Equals(opts.BenchSet, StringComparison.OrdinalIgnoreCase))
+        .Where(f => opts.BenchFilter is null || f.Id.Contains(opts.BenchFilter, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    if (benchFaults.Count == 0)
+    {
+        Console.Error.WriteLine($"No faults found in {faultsDir}.");
+        return 2;
+    }
+    Console.WriteLine($"Fault library: {faultsDir} ({benchFaults.Count} fault(s))");
+    benchGoals = benchFaults.Select(f => f.ToGoal()).ToList();
 }
 
 // 1-c) 손(타깃) 선택 — Unity 에디터(클라) vs UGS Cloud Code(백엔드)
@@ -239,17 +259,28 @@ var loopOptions = new LoopOptions
 };
 
 // 벤치마크 — 목표 세트를 통째로 돌려 비교 가능한 숫자를 만든다(ARCHITECTURE §10).
-if (opts.Bench)
+if (opts.Bench || opts.BenchFaults)
 {
     var benchId = startedAt.ToString("yyyyMMdd-HHmmss");
     var benchRuns = Path.Combine(projectPath, ".agentloop", "bench", benchId);
     // 요약(숫자)은 **목표 파일 옆**에 쌓는다 — 대상은 빈 샌드박스라 거기 두면 비교 이력이 흩어진다.
+    var resultsRoot = Path.GetDirectoryName(benchGoalsPath ?? ResolveBenchGoals(projectPath) ?? ".")!;
     var benchOut = opts.BenchOut
-        ?? Path.Combine(Path.GetDirectoryName(benchGoalsPath!)!, "results", benchId);
+        ?? Path.Combine(resultsRoot, benchFaults is not null ? "fault-results" : "results", benchId);
 
     var runner = new BenchRunner(backend, target, layout, projectPath, selectedSkills, loopOptions);
+
+    // 결함 모드: 목표마다 저장된 "실패한 첫 응답"을 재생하고, 이후는 실제 모델이 수리한다.
+    Func<BenchGoal, IAgentBackend>? backendFor = null;
+    if (benchFaults is not null)
+    {
+        var byId = benchFaults.ToDictionary(f => f.Id, StringComparer.OrdinalIgnoreCase);
+        backendFor = g => new SeededFaultBackend(g.Id, byId[g.Id].Reply, backend);
+    }
+
     var summary = await runner.RunAsync(
-        benchGoals!, benchId, benchRuns, opts.Model, opts.BenchTier ?? "all", cts.Token);
+        benchGoals!, benchId, benchRuns, opts.Model,
+        benchFaults is not null ? "fault" : (opts.BenchTier ?? "all"), cts.Token, backendFor);
 
     Console.WriteLine(BenchRunner.Report(summary));
     Console.WriteLine($"📁 summary: {BenchRunner.WriteSummary(benchOut, summary)}");
@@ -347,6 +378,8 @@ static Options ParseArgs(string[] args)
             case "--bench": o.Bench = true; break;
             case "--bench-set" when i + 1 < args.Length: o.BenchSet = args[++i]; break;
             case "--bench-tier" when i + 1 < args.Length: o.BenchTier = args[++i]; break;
+            case "--bench-faults": o.BenchFaults = true; break;
+            case "--faults-dir" when i + 1 < args.Length: o.FaultsDir = args[++i]; break;
             case "--bench-filter" when i + 1 < args.Length: o.BenchFilter = args[++i]; break;
             case "--bench-goals" when i + 1 < args.Length: o.BenchGoals = args[++i]; break;
             case "--bench-out" when i + 1 < args.Length: o.BenchOut = args[++i]; break;
@@ -546,6 +579,10 @@ static class HelpText
 
         BENCHMARK (measure the loop itself, so later improvements can be proven)
           --bench                  run every goal in Benchmark/goals.jsonl and report
+          --bench-faults           replay recorded faults instead of generating from scratch:
+                                   each run starts from a response that really failed verification,
+                                   so the step count measures REPAIR, which is what the loop provides
+          --faults-dir <path>      use a different fault library
           --bench-tier smoke|hard  which tier to run (default: all)
                                    smoke = fast regression sweep · hard = the measurement set
           --bench-set train|holdout|all
@@ -604,6 +641,8 @@ sealed class Options
     public bool Bench { get; set; }
     public string? BenchSet { get; set; }
     public string? BenchTier { get; set; }
+    public bool BenchFaults { get; set; }
+    public string? FaultsDir { get; set; }
     public string? BenchFilter { get; set; }
     public string? BenchGoals { get; set; }
     public string? BenchOut { get; set; }

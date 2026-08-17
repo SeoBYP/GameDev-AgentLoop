@@ -34,6 +34,6 @@ targets: unity
   message: Do not use DestroyImmediate in runtime scripts (it is editor-only). Use Destroy.
 
 - id: no-empty-update
-  scope: Update, FixedUpdate, LateUpdate
+  scope: Update, FixedUpdate, LateUpdate, Tick
   forbid-empty-body: true
   message: Do not declare an Update-family method with an empty body — Unity calls it every frame anyway.
