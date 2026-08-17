@@ -101,6 +101,7 @@ if (opts.Bench)
     Console.WriteLine($"Benchmark goals: {goalsPath}");
 
     benchGoals = BenchGoal.Load(goalsPath)
+        .Where(g => opts.BenchTier is null or "all" || g.Tier.Equals(opts.BenchTier, StringComparison.OrdinalIgnoreCase))
         .Where(g => opts.BenchSet is null or "all" || g.Set.Equals(opts.BenchSet, StringComparison.OrdinalIgnoreCase))
         .Where(g => opts.BenchFilter is null || g.Id.Contains(opts.BenchFilter, StringComparison.OrdinalIgnoreCase))
         .ToList();
@@ -247,7 +248,8 @@ if (opts.Bench)
         ?? Path.Combine(Path.GetDirectoryName(benchGoalsPath!)!, "results", benchId);
 
     var runner = new BenchRunner(backend, target, layout, projectPath, selectedSkills, loopOptions);
-    var summary = await runner.RunAsync(benchGoals!, benchId, benchRuns, opts.Model, cts.Token);
+    var summary = await runner.RunAsync(
+        benchGoals!, benchId, benchRuns, opts.Model, opts.BenchTier ?? "all", cts.Token);
 
     Console.WriteLine(BenchRunner.Report(summary));
     Console.WriteLine($"📁 summary: {BenchRunner.WriteSummary(benchOut, summary)}");
@@ -344,6 +346,7 @@ static Options ParseArgs(string[] args)
             case "--trace": o.ShowTrace = true; break;
             case "--bench": o.Bench = true; break;
             case "--bench-set" when i + 1 < args.Length: o.BenchSet = args[++i]; break;
+            case "--bench-tier" when i + 1 < args.Length: o.BenchTier = args[++i]; break;
             case "--bench-filter" when i + 1 < args.Length: o.BenchFilter = args[++i]; break;
             case "--bench-goals" when i + 1 < args.Length: o.BenchGoals = args[++i]; break;
             case "--bench-out" when i + 1 < args.Length: o.BenchOut = args[++i]; break;
@@ -543,6 +546,8 @@ static class HelpText
 
         BENCHMARK (measure the loop itself, so later improvements can be proven)
           --bench                  run every goal in Benchmark/goals.jsonl and report
+          --bench-tier smoke|hard  which tier to run (default: all)
+                                   smoke = fast regression sweep · hard = the measurement set
           --bench-set train|holdout|all
                                    which split to run (default: all)
           --bench-filter <text>    only goals whose id contains this
@@ -598,6 +603,7 @@ sealed class Options
     public string? RunsDir { get; set; }
     public bool Bench { get; set; }
     public string? BenchSet { get; set; }
+    public string? BenchTier { get; set; }
     public string? BenchFilter { get; set; }
     public string? BenchGoals { get; set; }
     public string? BenchOut { get; set; }

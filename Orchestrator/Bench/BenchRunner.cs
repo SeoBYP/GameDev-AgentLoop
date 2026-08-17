@@ -42,12 +42,12 @@ public sealed class BenchRunner
 
     public async Task<BenchSummary> RunAsync(
         IReadOnlyList<BenchGoal> goals, string benchId, string runsRoot,
-        string? model, CancellationToken ct)
+        string? model, string tier, CancellationToken ct)
     {
         var results = new List<BenchResult>();
         var startedAt = DateTime.Now;
 
-        Console.WriteLine($"benchmark {benchId} — {goals.Count} goal(s), backend {_backend.Name}, target {_target.Name}");
+        Console.WriteLine($"benchmark {benchId} — {goals.Count} goal(s) [tier {tier}], backend {_backend.Name}, target {_target.Name}");
         Console.WriteLine(new string('═', 78));
 
         for (var i = 0; i < goals.Count; i++)
@@ -88,7 +88,7 @@ public sealed class BenchRunner
 
             wall.Stop();
             results.Add(new BenchResult(
-                g.Id, g.Set, g.Tags, success, steps,
+                g.Id, g.Set, g.Tier, g.Tags, success, steps,
                 Math.Round(wall.Elapsed.TotalMilliseconds, 0), summary, store.RunId));
 
             Console.WriteLine($"  → {(success ? "✅" : "❌")} {steps} step(s), {wall.Elapsed.TotalSeconds:F1}s — {summary}");
@@ -98,7 +98,7 @@ public sealed class BenchRunner
 
         return new BenchSummary(
             benchId, startedAt.ToString("o"), _backend.Name, _target.Name, model,
-            _template.MaxSteps, _skills.Select(s => s.Name).ToList(), results);
+            _template.MaxSteps, tier, _skills.Select(s => s.Name).ToList(), results);
     }
 
     // ── 프로젝트 원상복구 ─────────────────────────────────────────────────────
@@ -113,6 +113,37 @@ public sealed class BenchRunner
                 foreach (var f in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
                     files.Add(f);
         return files;
+    }
+
+    /// <summary>
+    /// 소유 폴더 아래에서 **비어 버린 하위 폴더**를 정리한다(그 .meta 까지).
+    /// 소유 폴더 자체와 asmdef 이 있는 폴더는 건드리지 않는다.
+    /// </summary>
+    private int PruneEmptyDirs()
+    {
+        var pruned = 0;
+        foreach (var root in TrackedDirs())
+        {
+            if (!Directory.Exists(root))
+                continue;
+
+            // 깊은 곳부터 지워야 중첩된 빈 폴더가 한 번에 정리된다.
+            foreach (var dir in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
+                                         .OrderByDescending(d => d.Length))
+            {
+                try
+                {
+                    if (Directory.EnumerateFileSystemEntries(dir).Any())
+                        continue;
+                    Directory.Delete(dir);
+                    if (File.Exists(dir + ".meta"))
+                        File.Delete(dir + ".meta");
+                    pruned++;
+                }
+                catch { /* 지우지 못해도 벤치는 계속한다 */ }
+            }
+        }
+        return pruned;
     }
 
     private IEnumerable<string> TrackedDirs()
@@ -138,6 +169,10 @@ public sealed class BenchRunner
             catch { /* 지우지 못해도 벤치는 계속한다 */ }
         }
 
+        // 생성물이 하위 폴더를 만든 경우, 파일만 지우면 **빈 폴더와 .meta 가 남는다**(실측).
+        // Unity 가 그걸 다시 임포트하며 다음 목표에 잔재를 남긴다.
+        removed += PruneEmptyDirs();
+
         if (removed == 0)
             return;
 
@@ -160,7 +195,7 @@ public sealed class BenchRunner
         var sb = new StringBuilder();
         sb.AppendLine();
         sb.AppendLine(new string('═', 78));
-        sb.AppendLine($"benchmark {s.BenchId}   backend {s.Backend} · target {s.Target}" +
+        sb.AppendLine($"benchmark {s.BenchId}   tier {s.Tier} · backend {s.Backend} · target {s.Target}" +
                       (s.Model is null ? "" : $" · model {s.Model}"));
         sb.AppendLine(new string('═', 78));
         sb.AppendLine($"{"goal",-20} {"set",-8} {"result",-8} {"steps",6} {"time",9}");

@@ -15,6 +15,7 @@ public sealed record BenchGoal(
     string Goal,
     string Set,                      // "train" | "holdout"
     IReadOnlyList<string> Tags,
+    string Tier = "smoke",           // "smoke"(빠른 회귀) | "hard"(측정용)
     string? Target = null)           // 비우면 실행 시 지정한 타깃
 {
     public static IReadOnlyList<BenchGoal> Load(string path)
@@ -36,7 +37,11 @@ public sealed record BenchGoal(
             if (!seen.Add(g.Id))
                 throw new FormatException($"{path}:{n} — duplicate id '{g.Id}'.");
 
-            goals.Add(g with { Set = string.IsNullOrWhiteSpace(g.Set) ? "train" : g.Set.ToLowerInvariant() });
+            goals.Add(g with
+            {
+                Set  = string.IsNullOrWhiteSpace(g.Set)  ? "train" : g.Set.ToLowerInvariant(),
+                Tier = string.IsNullOrWhiteSpace(g.Tier) ? "smoke" : g.Tier.ToLowerInvariant(),
+            });
         }
         return goals;
     }
@@ -52,6 +57,7 @@ public sealed record BenchGoal(
 public sealed record BenchResult(
     string Id,
     string Set,
+    string Tier,
     IReadOnlyList<string> Tags,
     bool   Success,
     int    Steps,
@@ -70,6 +76,7 @@ public sealed record BenchSummary(
     string Target,
     string? Model,
     int MaxSteps,
+    string Tier,                     // 이 실행이 어느 tier 를 돌렸는지 — 섞인 숫자를 비교하지 않게
     IReadOnlyList<string> Skills,
     IReadOnlyList<BenchResult> Results)
 {
