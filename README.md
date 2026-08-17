@@ -30,14 +30,19 @@ deterministic demo you can run yourself, without an API key.
 | ③-a **Compile** | *plausible code that doesn't build* | real compiler errors via `recompile_status` |
 | ③-b **Runtime behavior** | *compiles, but the logic is wrong* | **Unity Test Runner** (or a PlayMode `eval` assert) |
 | ③-b′ **Scenario & input** | *looks right if you only check one frame* | `[UnityTest]` coroutines + **virtual input injection** |
-| ③-c **Time budget** | *correct, but allocates every frame* | run the hot path 50k times and **measure elapsed time** |
-| ③-c′ **Render budget** | *fast, but explodes draw calls* | measure the **draw-call / triangle increase** it leaves in the scene |
 | ①-b **Domain quality** | *runs, but is built badly* | static skill checks **reject it before it is applied** |
+| ③-c **Time / render budget** *(opt-in)* | *correct, but allocates every frame or floods draw calls* | run the hot path 50k times and **measure**; measure the **draw-call increase** left in the scene |
 
 Verification **persists as an asset** — the AI writes PlayMode tests alongside the implementation,
 and those tests stay in your repo to catch regressions on every later run.
 
-### A real run — "correct" is not the same as "fast enough"
+> **Why performance is opt-in.** *Does it work* and *is it fast enough* are different questions with
+> different cadences. An editor timing is not shipping performance — Mono instead of IL2CPP, no burst,
+> editor loop overhead — so it is a **relative** signal, useful for catching per-frame allocation but
+> not for absolute budgets. Real numbers come from a build, measured separately. Enable the in-loop
+> check with `--perf`; see [ARCHITECTURE §9.5](docs/ARCHITECTURE.md).
+
+### A real run with `--perf` — "correct" is not the same as "fast enough"
 
 ```
 step 1  ③ compile passed          ✅
@@ -104,8 +109,8 @@ Each demo reproduces one class of failure and repairs it, deterministically:
 agentloop --demo         # compile error        -> self-repair
 agentloop --demo-play    # compiles, behaves wrong
 agentloop --demo-skills  # violates a domain rule -> rejected before apply
-agentloop --demo-perf    # correct, but allocates on the hot path
-agentloop --demo-draw    # fast, but floods draw calls
+agentloop --demo-perf    # correct, but allocates on the hot path   (turns --perf on)
+agentloop --demo-draw    # fast, but floods draw calls              (turns --perf on)
 ```
 
 Run `agentloop --help` for the full option list.
@@ -211,8 +216,9 @@ agentloop --skills off       # disable them
   orchestrator does not own. `SnippetGuard` statically blocks file/process/network/registry access,
   but string tricks can bypass it. Use `--tests-only` to eliminate temporary snippets entirely and
   verify only through compiled, reviewable test files.
-- **Absolute millisecond budgets are machine-dependent.** They are useful as *relative* signals; the
-  same code measured 13.9ms and 11.9ms across runs, so budgets need generous margins.
+- **Editor timings are not shipping performance**, which is why the budget stage is opt-in (`--perf`).
+  They are useful as *relative* signals — the same code measured 13.9ms and 11.9ms across runs — so
+  budgets need generous margins, and the real measurement belongs in a build.
 - **Memory is diagnostic, not a budget.** Unity's Mono uses the Boehm GC, so `monoUsedBytes` can go
   *down* under load — unusable as a pass/fail criterion. Time and render metrics are used instead.
 - **UGS invocation is verified; nothing else about your cloud project is.**

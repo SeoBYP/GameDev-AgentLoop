@@ -195,10 +195,10 @@ public sealed class AgentLoop
             _log($"③ verify   → {runtimeLabel} passed ✅  {play.Log}");
             runtimeSpan?.Pass(string.IsNullOrWhiteSpace(play.Log) ? source : $"{source} · {play.Log}").Dispose();
 
-            // ③-c 검증: 성능 예산 (프로파일링) — "동작 정상 ≠ 충분히 빠름"
-            // PERF 블록은 eval 로 측정하므로 tests-only 모드에서는 건너뛴다
-            // (성능 단언이 필요하면 테스트 파일 안에서 Stopwatch 로 하도록 지침에 명시).
-            var perfSpec = (_options.NoPerf || testsOnly) ? null : EditParser.ParsePerf(reply.Text);
+            // ③-c 검증: 성능 예산 — **기본적으로 루프 밖이다**(타깃이 Supports 로 선언한다).
+            // 에디터 측정치는 출시 성능이 아니라 상대 신호이고, 정확성과는 주기가 다른 질문이다.
+            // PERF 블록은 eval 로 측정하므로 tests-only 모드에서도 건너뛴다.
+            var perfSpec = testsOnly ? null : EditParser.ParsePerf(reply.Text);
             if (perfSpec is null || !_target.Supports(VerifyKind.Performance))
             {
                 // ⑤ 판정

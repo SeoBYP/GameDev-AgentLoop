@@ -134,7 +134,8 @@ else
         unityExe, projectPath,
         label: $"unity:{ReadEditorVersion(projectPath)}",
         layout: layout,
-        allowUnsafeEval: opts.AllowUnsafeEval);
+        allowUnsafeEval: opts.AllowUnsafeEval,
+        inlinePerf: opts.Perf);
 }
 
 // 1-d) 조립된 시스템 프롬프트만 보고 끝내기(디버깅/설명용) — 인증 없이도 타깃별 규격을 확인할 수 있다.
@@ -230,7 +231,6 @@ var loopOptions = new LoopOptions
 {
     MaxSteps = opts.MaxSteps,
     Assert = opts.Assert,   // 사람이 준 런타임 검증 기준(있으면 AI 의 ASSERT 블록보다 우선)
-    NoPerf = opts.NoPerf,
     CaptureDir = opts.Capture ? (opts.CaptureDir ?? Path.Combine(store.Root, "evidence")) : null,
     HistoryWindow = opts.HistoryWindow,
     VerifyMode = opts.TestsOnly ? VerifyMode.TestsOnly : VerifyMode.Auto,
@@ -324,9 +324,10 @@ static Options ParseArgs(string[] args)
             case "--demo": o.Demo = true; break;
             case "--demo-play": o.DemoPlay = true; break;
             case "--demo-skills": o.DemoSkills = true; break;
-            case "--demo-perf": o.DemoPerf = true; break;
-            case "--demo-draw": o.DemoDraw = true; break;
-            case "--no-perf": o.NoPerf = true; break;
+            // 성능 데모는 성능 검증이 켜져 있어야 의미가 있다 — 자기 전제를 스스로 켠다.
+            case "--demo-perf": o.DemoPerf = true; o.Perf = true; break;
+            case "--demo-draw": o.DemoDraw = true; o.Perf = true; break;
+            case "--perf": o.Perf = true; break;
             case "--capture": o.Capture = true; break;
             case "--allow-unsafe-eval": o.AllowUnsafeEval = true; break;
             case "--tests-only": o.TestsOnly = true; break;
@@ -522,7 +523,9 @@ static class HelpText
         VERIFICATION
           --assert <c#>            supply your own runtime check instead of letting the model write one
           --tests-only             verify only through compiled test files; never eval temp snippets
-          --no-perf                skip the performance budget stage
+          --perf                   also enforce a performance budget inside the loop (OFF by default:
+                                   editor timings are a relative signal, not shipping performance —
+                                   real numbers come from a build, measured separately)
           --capture                save a Game View screenshot as evidence on success
           --max-steps <n>          give up after n repair attempts (default 6)
 
@@ -576,7 +579,7 @@ sealed class Options
     public bool DemoSkills { get; set; }
     public bool DemoPerf { get; set; }
     public bool DemoDraw { get; set; }
-    public bool NoPerf { get; set; }
+    public bool Perf { get; set; }
     public bool Capture { get; set; }
     public bool AllowUnsafeEval { get; set; }
     public bool TestsOnly { get; set; }

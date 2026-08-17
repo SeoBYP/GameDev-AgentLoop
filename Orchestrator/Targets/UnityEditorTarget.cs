@@ -29,15 +29,22 @@ public sealed class UnityEditorTarget : IExecTarget
     private readonly string _label;
     private readonly bool _allowUnsafeEval;   // 가드 우회(명시적 opt-in)
     private readonly ProjectLayout _layout;   // 대상 프로젝트의 배치(경로·어셈블리)
+    private readonly bool _inlinePerf;        // 루프 안에서 성능까지 볼지(기본 off)
 
     public string Name => _label;
 
     // 테스트 asmdef 이 없는 프로젝트에서는 테스트 검증이 **원리적으로 불가능**하다
     // (Unity 테스트 asmdef 은 Assembly-CSharp 을 참조할 수 없다). 못 하는 걸 된다고 하지 않는다.
+    //
+    // 성능은 **기본적으로 루프 밖**이다. 에디터 측정치는 Mono·burst 없음·에디터 오버헤드 때문에
+    // 출시 성능이 아니라 *상대* 신호일 뿐이고(WORKLOG: 같은 코드가 13.9ms↔11.9ms),
+    // 게다가 PlayMode 테스트 직후의 eval 은 도메인 리로드 창에 걸려 **멀쩡한 코드를 실패로 만든다**.
+    // → 정확성(컴파일·테스트)과 성능은 주기가 다른 질문이라 분리한다. `--perf` 로 켤 수 있다.
     public bool Supports(VerifyKind kind) => kind switch
     {
         VerifyKind.Tests => _layout.TestsReady,
-        VerifyKind.Compile or VerifyKind.RuntimeAssert or VerifyKind.Performance => true,
+        VerifyKind.Performance => _inlinePerf,
+        VerifyKind.Compile or VerifyKind.RuntimeAssert => true,
         _ => false,
     };
 
@@ -62,6 +69,9 @@ public sealed class UnityEditorTarget : IExecTarget
     public string GenerationBrief => BriefTemplate
         // 섹션을 먼저 끼운다 — 삽입되는 텍스트 안에도 자리표시자가 들어 있다.
         .Replace("%TEST_SECTION%", _layout.TestsReady ? TestSection : NoTestSection)
+        // 성능을 안 볼 거면 PERF 블록을 **요구하지 않는다** — 쓰라고 해 놓고 무시하면
+        // 토큰만 쓰고, 모델이 자기 예산을 스스로 정하는 나쁜 습관도 그대로 남는다.
+        .Replace("%PERF_SECTION%", _inlinePerf ? PerfSection : "")
         .Replace("%SCRIPT_DIR%", _layout.ScriptDir)
         .Replace("%TEST_DIR%", _layout.TestDir)
         .Replace("%TEST_ASSEMBLY%", _layout.TestAssembly ?? "-")
@@ -88,6 +98,11 @@ public sealed class UnityEditorTarget : IExecTarget
               `UnityEngine.Object.DestroyImmediate(go)` before returning.
             * Use fully qualified UnityEngine names. Do not use `using` directives.
             * No file I/O, no scene loading, no coroutines, no waiting across frames.
+        %PERF_SECTION%
+        """;
+
+    // 성능 섹션은 `--perf` 일 때만 붙는다.
+    private const string PerfSection = """
 
         - Then emit EXACTLY ONE performance budget as:
         PERF:
@@ -198,6 +213,7 @@ public sealed class UnityEditorTarget : IExecTarget
         string label,
         ProjectLayout layout,
         bool allowUnsafeEval = false,
+        bool inlinePerf = false,
         int timeoutSec = 120)
     {
         _unityExe = unityExe;
@@ -205,6 +221,7 @@ public sealed class UnityEditorTarget : IExecTarget
         _label = label;
         _layout = layout;
         _allowUnsafeEval = allowUnsafeEval;
+        _inlinePerf = inlinePerf;
         _timeoutSec = timeoutSec;
     }
 

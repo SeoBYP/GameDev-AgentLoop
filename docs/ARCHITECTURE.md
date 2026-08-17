@@ -290,7 +290,7 @@ flowchart LR
     VC --> VR{{"runtime verification"}}
     VR -->|"tests exist"| VT["Tests"]
     VR -->|"no tests"| VA["Assert · eval"]
-    VT --> VP["VerifyPerf<br/>time · render budgets"]
+    VT --> VP["VerifyPerf<br/>time · render budgets<br/><i>opt-in — §9.4</i>"]
     VA --> VP
     VP --> J([Judge])
 
@@ -813,7 +813,9 @@ draw calls went from 30 to 120.
 
 **[planned]** accumulate the measurement distribution, derive a budget as `p95 × margin`, and use it to
 **validate and correct** the model's proposal. Small, clear, and it removes a pain felt twice already.
-A good first act of self-improvement.
+
+This belongs to the optimization pass (§9.4), not the inline loop — calibrating a budget against
+editor timings would just make a machine-dependent number look official.
 
 ### 9.2 Distiller — from failures into skills
 
@@ -834,7 +836,53 @@ Accumulate `(goal class, config) → steps to convergence` and routing becomes l
 Combined with best-of-N (§5.4) it turns into a bandit problem — give more generation budget to the
 backend that has been winning.
 
-### 9.4 Out of scope — weight training
+### 9.4 Performance belongs outside the loop
+
+**[now]** The budget stage is **opt-in** (`--perf`), not part of the default verification chain.
+Two independent reasons, both measured here:
+
+**1. An editor timing is not shipping performance.** The editor runs Mono rather than IL2CPP, with no
+burst compilation, no managed stripping, and its own loop overhead. It is a useful *relative* signal —
+allocation-free vs. allocating measured 4.8ms vs. 30.2ms, a 6× gap that reproduced reliably — but the
+same code also measured 13.9ms and 11.9ms across runs. That is a regression detector, not a budget.
+Calling it `maxTotalMs` implied an authority it never had.
+
+**2. It was corrupting the loop's own verdicts.** The PERF snippet runs through `eval`, and an `eval`
+issued right after a PlayMode test run lands in the domain-reload window:
+
+```
+③ verify → Test Runner passed ✅  7/7 tests passed      ← the code was correct
+③ verify → perf budget ❌  'Health' could not be found  ← the assembly was not back yet
+```
+
+That infrastructure failure was fed back to the model **as if its code were wrong**, and the model
+spent a step regenerating code that had already passed. It reproduced on 2 of 2 benchmark goals
+before the sweep was stopped — systematic, not noise. Exactly the `Fail`/`Fatal` confusion §5.3
+warns about, surviving in the one path that still used `eval` after tests.
+
+Removing the stage from the default chain fixes the second problem **structurally** rather than by
+adding retries: when tests exist, nothing runs `eval`, so there is no race to lose.
+
+**[planned]** A separate optimization pass. *Does it work* and *is it fast enough* have different
+cadences, so the second question gets its own loop, its own trace, and — critically — its own
+measurement location.
+
+```mermaid
+flowchart LR
+    R[("run traces")] --> C["pick candidates<br/>hot paths · past budget misses"]
+    C --> B["build the player"]
+    B --> M["measure in the build"]
+    M -->|"over budget"| O["optimization loop<br/>repair → re-measure"]
+    O --> M
+    M -->|"within budget"| T[("optimization trace")]
+```
+
+**[unmeasured]** whether the pipeline server can be driven inside a player build. `unity command`
+exposes `--runtime <player exec name>` and `--runtime-path <path>` for attaching to a running Unity
+Player, which would make measuring in a real build possible — but that has not been tried. Until it
+is, no claim is made about build-accurate numbers.
+
+### 9.5 Out of scope — weight training
 
 The backends are CLI agents we do not control, so fine-tuning is out of scope.
 But **the byproduct remains**: `(prompt, generation, verdict)` is exactly the shape of
