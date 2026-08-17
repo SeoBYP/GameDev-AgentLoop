@@ -103,5 +103,37 @@ CLI AI 에이전트(Claude Code / Codex / Anthropic API)가 Unity 게임 개발 
   - 터치 함정: `TouchPhase` 는 `UnityEngine`·`UnityEngine.InputSystem` 양쪽에 있어 **정규화 필수**(아니면 CS0104). 다른 장치엔 없던 함정.
   - 공통: 입력은 **큐잉**되므로 `yield return null` 필수. (`queueEventOnly:false` 때문이라 적었다가 뒤집어 재 보니 틀림 — 프레임 넘기기가 진짜 요건.)
 - 데모 5종: `--demo` `--demo-play` `--demo-skills` `--demo-perf` `--demo-draw`
-- 다음: 빌드 성능과 에디터 측정치 차이 보정.
-- 상세: [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)
+
+## 다음 방향 — 루프에서 실행 그래프로 (ARCHITECTURE)
+포폴의 핵심은 "Unity 자동화"가 아니라 **Loop Agent → 실행 그래프(Graph Engineering)** 다.
+설계는 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)(영문 원본) · [docs/ARCHITECTURE.ko.md](docs/ARCHITECTURE.ko.md) 에
+13개 절 + Mermaid 로 있다. 표기: `[현재]` / `[계획]` / `[미실측]` — **아직 안 잰 것을 잰 것처럼 쓰지 않는다.**
+- **오픈소스화 완료** — 영문 우선(`README.md`/`README_ko.md`, `CONTRIBUTING`), MIT, `.github/workflows/ci.yml`(검사 6개,
+  각각 **실제로 났던 버그** 하나를 막는다), 이슈/PR 템플릿.
+- **이식성** — `ProjectLayout`(`.agentloop/layout.json` → 자동탐지 → 관례)로 어셈블리·경로 하드코딩 제거.
+  `--init` 이 asmdef 한 쌍을 만든다(Input System 이 있으면 참조도 자동). Skills 는 **오케스트레이터 쪽**에서 찾는다.
+- **트레이스** — `RunStore`/`Span`(`ParentSpanId`, `SpanKind` = Run/Work/Phase/Node/Lease). 모든 실행이 기록된다.
+- **노드 파이프라인** — `SkillCheck → Apply → VerifyCompile → VerifyRuntime → VerifyPerf`(`INode`).
+  `NodeOutcome` 을 **누구 잘못인가**로 나눈다: `Pass`/`Fail`(모델)/`Skip`/`Blocked`(다른 세션)/`Fatal`(인프라).
+  이 구분이 실제로 값을 했다 — 도메인 리로드 경합을 모델 탓으로 되먹이던 버그를 잡았다.
+- **성능은 루프 밖으로**(옵트인 `--perf`) — 매 스텝 재는 건 낭비이고, `eval` 이 리로드 직후 실패해
+  **모델 탓으로 오귀속**되고 있었다. 최적화는 트레이스를 보는 별도 패스로 간다(§9.4).
+
+## 계기(벤치마크) — 셋 다 포화. 이게 지금 가장 중요한 사실
+`Benchmark/` (샌드박스는 **별도 Unity 프로젝트** `Benchmark/Sandbox/`, 포트 7801 — 본 프로젝트 오염 방지).
+| 계기 | 결과 | 이론적 여유 |
+|---|---|---|
+| 목표 30개(smoke 18 / hard 12) | 18/18 · 홀드아웃 1.33 / **12/12 원샷 1.00** | 0.33 / **0** |
+| 결함 주입 8개(`--bench-faults`) | 8/8 수리 · 평균 2.125 | **0.125** (바닥이 1 아니라 **2**) |
+- 흔들림이 여유보다 크다(목표 벤치 0.22 vs 0.33) → **완벽한 루프도 증명이 안 된다.**
+- 원인은 하나다: 셋 다 **고립된 단일 컴포넌트**를 잰다. 이 크기에서 루프는 이미 잘한다.
+- 결함 주입은 재현이 정확(8/8 동일 노드·메시지)해서 **회귀 방지엔 강하고** 진척 계기판으론 약하다.
+  진척용으로 쓰려면 `originalSteps >= 3` 인 결함이 필요하다.
+- **내 난이도 예측은 하루에 세 번 틀렸다**(검사 5개 무득점 · 12ms 예산 플래키 · hard 전부 원샷).
+  → 난이도·결함을 **손으로 발명하지 않는다.** 실제 트레이스에서 추출한다.
+- **결과를 한 번의 실행으로 판정하지 않는다** — `--demo-perf`/`--demo-play` 를 각각 1회로 회귀라 판정했다가
+  3회 반복에서 뒤집혔다. 그 이상현상은 **오탐 통과**(낡은 어셈블리 측정)라 오탐 실패보다 위험하다.
+
+- **다음: 샘플 로그라이크**(`Sample/Roguelike/`) — 벤치를 더 깎는 게 아니라 §7(멀티세션)·§8(코드 부패)이
+  **실제로 발생하는 환경**을 만든다. 필요한 기능은 만들어 가면서 추가한다.
+- 상세: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/DESIGN.md](docs/DESIGN.md) · 작업 로그 [docs/WORKLOG.md](docs/WORKLOG.md) · [Orchestrator/README.md](Orchestrator/README.md)

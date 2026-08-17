@@ -973,8 +973,29 @@ have baked a misattribution into the library, and they would not reproduce anywa
 The current library covers all three verification layers — 2 static, 1 compile, 5 runtime — and the
 sample game's real failures will feed it, so the loop ends up producing its own regression tests.
 
-**[unmeasured]** the repair baseline itself. One fault (`damage-over-time`) has been replayed
-end-to-end and reproduced correctly; the full sweep has not been recorded yet.
+### The repair baseline — recorded `20260817-152343`
+
+**[now]** All 8 faults, `claude-code:sonnet`: **8/8 repaired**, mean **2.125** steps
+(original runs: 2.375).
+
+**Reproduction is exact** — every fault failed at step 1 in precisely the way it originally did, same
+node and same message. That is the payoff of fixing the starting point: the goal benchmark moved 9 of
+18 goals across two runs of equivalent code, while this moved 1 of 8.
+
+**But the floor is 2, not 1.** Step 1 is the injected fault, so it always fails; the best possible
+score is 2.00 (fault, then one successful repair). At 2.125 the headroom is **0.125 steps**, and only
+`object-pool` needs more than one repair attempt.
+
+So this instrument is **also nearly saturated** — and the reason is worth stating plainly: given a
+specific error message, the loop's feedback already fixes a single defect on the first attempt,
+almost every time. That makes it a strong **regression guard** (degrade the feedback and steps rise)
+but a weak progress meter — the same conclusion the goal benchmark reached by a different road.
+
+**The pattern across three attempts** is the real finding: goals, harder goals, and injected faults
+all saturate. The loop is already good at everything measurable in a single isolated component. What
+is left unmeasured is what needs a real project — cross-feature integration, code accretion, and
+contracts between systems (§7, §8). To make faults a progress meter, they must need **three or more**
+repair attempts; when extracting new ones, prefer `originalSteps >= 3`.
 
 Note what this does **not** measure: prevention. A skill's value is that the bad code never appears,
 and injecting the fault bypasses that. Prevention stays on the goal benchmark's violation rate.

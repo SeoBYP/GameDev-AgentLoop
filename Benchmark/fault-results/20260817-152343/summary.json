@@ -1,0 +1,151 @@
+{
+  "BenchId": "20260817-152343",
+  "StartedAt": "2026-08-17T15:23:43.5202869\u002B09:00",
+  "Backend": "claude-code:sonnet",
+  "Target": "unity:6000.5.4f1",
+  "MaxSteps": 6,
+  "Tier": "fault",
+  "Skills": [
+    "client-architecture",
+    "unity-performance",
+    "unity-pitfalls"
+  ],
+  "Results": [
+    {
+      "Id": "buff-stack",
+      "Set": "train",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "SkillCheck"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 25651,
+      "Summary": "applied and verified in 2 step(s) (no runtime criterion)",
+      "RunId": "20260817-152343"
+    },
+    {
+      "Id": "cooldown-timer",
+      "Set": "train",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "VerifyRuntime"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 81520,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-152415"
+    },
+    {
+      "Id": "damage-over-time",
+      "Set": "train",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "VerifyTests"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 152558,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-152538"
+    },
+    {
+      "Id": "grid-spawner",
+      "Set": "train",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "VerifyTests"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 74967,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-152812"
+    },
+    {
+      "Id": "inventory-stack",
+      "Set": "holdout",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "SkillCheck"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 60386,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-152929"
+    },
+    {
+      "Id": "move-to-target",
+      "Set": "train",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "VerifyRuntime"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 235978,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-153031"
+    },
+    {
+      "Id": "object-pool",
+      "Set": "train",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "VerifyCompile"
+      ],
+      "Success": true,
+      "Steps": 3,
+      "WallClockMs": 94784,
+      "Summary": "applied and runtime-verified in 3 step(s)",
+      "RunId": "20260817-153428"
+    },
+    {
+      "Id": "wave-spawner",
+      "Set": "holdout",
+      "Tier": "fault",
+      "Tags": [
+        "fault",
+        "VerifyTests"
+      ],
+      "Success": true,
+      "Steps": 2,
+      "WallClockMs": 390072,
+      "Summary": "applied and runtime-verified in 2 step(s)",
+      "RunId": "20260817-153605"
+    }
+  ],
+  "All": {
+    "Set": "all",
+    "Total": 8,
+    "Passed": 8,
+    "SuccessRate": 100,
+    "MeanSteps": 2.12,
+    "MeanWallClockMs": 139490
+  },
+  "Train": {
+    "Set": "train",
+    "Total": 6,
+    "Passed": 6,
+    "SuccessRate": 100,
+    "MeanSteps": 2.17,
+    "MeanWallClockMs": 110910
+  },
+  "Holdout": {
+    "Set": "holdout",
+    "Total": 2,
+    "Passed": 2,
+    "SuccessRate": 100,
+    "MeanSteps": 2,
+    "MeanWallClockMs": 225229
+  }
+}
