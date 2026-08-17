@@ -1,4 +1,5 @@
 using Orchestrator.Contracts;
+using Orchestrator.Loop.Nodes;
 using Orchestrator.Skills;
 using Orchestrator.Trace;
 using Orchestrator.Util;
@@ -6,17 +7,19 @@ using Orchestrator.Util;
 namespace Orchestrator.Loop;
 
 /// <summary>
-/// 루프 소유자. DESIGN.md §5 의 5단계를 그대로 구현한다:
+/// 루프 소유자 — 이제 **실행기**다.
 ///
 ///   목표(자연어)
-///    → ① 생성   backend.CompleteAsync           (텍스트/파일편집 out)
-///    → ② 적용   target.ApplyAsync               (파일쓰기 + 리컴파일)
-///    → ③ 검증   target.VerifyAsync              (컴파일 에러?)
-///    → ④ 피드백  에러를 History에 넣어 백엔드로 되돌림
-///    → ⑤ 판정   통과 → 종료 / 실패 → ①로 (maxSteps 가드)
+///    → ① 생성   backend.CompleteAsync
+///    → 노드 파이프라인   SkillCheck → Apply → VerifyCompile → VerifyRuntime → VerifyPerf
+///    → ④ 피드백  실패한 노드가 쓴 문장을 History 에 넣어 백엔드로 되돌림
+///    → ⑤ 판정   전부 Pass/Skip → 종료 / 하나라도 Fail → 다음 시도 (maxSteps 가드)
 ///
-/// 이 클래스가 "루프는 우리 것"(D1)의 실체다. 백엔드/타깃은 인터페이스 뒤에 있고,
-/// 적용·검증·재시도·판정의 흐름은 전적으로 여기서 소유한다.
+/// **흐름 제어는 노드 밖에 있다**(ARCHITECTURE §5.2). 노드는 자기 판단만 하고,
+/// 라우팅·타이밍·기록은 여기가 소유한다. 그래서 "검증을 하나 추가한다"가
+/// *이 메서드 수술*이 아니라 *파이프라인 등록*이 된다.
+///
+/// 이 클래스가 "루프는 우리 것"(D1)의 실체다.
 /// </summary>
 public sealed class AgentLoop
 {
@@ -26,6 +29,7 @@ public sealed class AgentLoop
     private readonly IReadOnlyList<Skill> _skills;
     private readonly Action<string> _log;
     private readonly RunTrace? _trace;
+    private readonly IReadOnlyList<INode> _pipeline;
 
     public AgentLoop(
         IAgentBackend backend,
@@ -33,7 +37,8 @@ public sealed class AgentLoop
         LoopOptions options,
         IReadOnlyList<Skill>? skills = null,
         Action<string>? log = null,
-        RunTrace? trace = null)
+        RunTrace? trace = null,
+        IReadOnlyList<INode>? pipeline = null)
     {
         _backend = backend;
         _target = target;
@@ -41,11 +46,21 @@ public sealed class AgentLoop
         _skills = skills ?? Array.Empty<Skill>();
         _log = log ?? Console.WriteLine;
         _trace = trace;
+        _pipeline = pipeline ?? DefaultPipeline;
     }
 
-    // 트레이스가 없으면(레거시 호출) 아무것도 기록하지 않는 더미 스코프를 쓴다 —
-    // 호출부가 매번 null 검사를 하지 않도록.
-    private SpanScope? Begin(SpanKind kind, string name) => _trace?.Begin(kind, name);
+    /// <summary>
+    /// 기본 검증 사슬. 순서가 곧 정책이다 — 싼 검사(정적)를 앞에, 비싼 검사(플레이모드)를 뒤에 둔다.
+    /// 성능은 마지막이고, 타깃이 지원하지 않으면 스스로 Skip 한다(§9.4).
+    /// </summary>
+    public static readonly IReadOnlyList<INode> DefaultPipeline = new INode[]
+    {
+        new SkillCheckNode(),
+        new ApplyNode(),
+        new VerifyCompileNode(),
+        new VerifyRuntimeNode(),
+        new VerifyPerfNode(),
+    };
 
     public async Task<LoopResult> RunAsync(string goal, CancellationToken ct)
     {
@@ -58,20 +73,26 @@ public sealed class AgentLoop
         var system = BuildSystemPrompt(_target, _skills);
         var history = new List<Turn> { new(Role.User, BuildInitialPrompt(goal)) };
 
-        // 이 실행에서 테스트 파일이 한 번이라도 적용됐는지.
-        // 이후 스텝이 구현만 고쳐 보내도 테스트는 이미 프로젝트에 있으므로 테스트 러너로 검증해야 한다.
-        var testsInProject = false;
+        var ctx = new RunContext
+        {
+            Goal = goal,
+            Target = _target,
+            Skills = _skills,
+            Options = _options,
+            Log = _log,
+        };
 
         for (int step = 1; step <= _options.MaxSteps; step++)
         {
             _log($"\n──────── step {step}/{_options.MaxSteps} ────────");
-            using var stepSpan = Begin(SpanKind.Phase, $"step {step}");
+            using var stepSpan = _trace?.Begin(SpanKind.Phase, $"step {step}");
+            ctx.Attempt = step;
 
             // ① 생성 — 오래된 시도는 잘라 보낸다(계약이 "매번 전체 파일"이라 최신 것만 있으면 충분).
             var sent = Trim(history);
             _log($"  (context {Feedback.ApproxChars(system, sent.Select(t => t.Content)):N0} chars / {sent.Count} turns)");
 
-            var genSpan = Begin(SpanKind.Node, "Generate");
+            var genSpan = _trace?.Begin(SpanKind.Node, "Generate");
             var reply = await _backend.CompleteAsync(new AgentContext(system, sent), ct);
             history.Add(new Turn(Role.Assistant, reply.Text));
             _log($"① generate → {reply.Edits.Count} file edit(s)");
@@ -85,158 +106,109 @@ public sealed class AgentLoop
                 continue;
             }
             genSpan?.Pass($"{reply.Edits.Count} file edit(s)  [{_backend.Name}]").Dispose();
+            ctx.Reply = reply;
 
-            // ①-b 스킬 정적 검사 — 프로젝트에 적용하기 **전에** 품질 위반을 거른다.
-            // 지침을 프롬프트로 주는 데서 그치지 않고 검사로 강제하는 게 Phase 3 의 핵심이다.
-            if (_skills.Count > 0)
-            {
-                using var skillSpan = Begin(SpanKind.Node, "SkillCheck");
-                var violations = SkillLibrary.Inspect(_skills, reply.Edits);
-                if (violations.Count > 0)
-                {
-                    _log($"①-b check  → {violations.Count} skill violation(s) ❌ (not applied)");
-                    foreach (var v in violations.Take(5))
-                        _log($"      · {v}");
-
-                    skillSpan?.Fail(violations.Select(v => $"{v.FilePath}: {v.Message}").ToList(),
-                                    $"{violations.Count} violation(s)");
-
-                    // ④ 피드백 → 다음 스텝 ①로
-                    history.Add(new Turn(Role.User, BuildViolationFeedback(violations)));
-                    continue;
-                }
-                _log("①-b check  → skills passed ✅");
-                skillSpan?.Pass($"{_skills.Sum(s => s.Checks.Count)} checks");
-            }
-
-            // ② 적용
-            var applySpan = Begin(SpanKind.Node, "Apply");
-            var apply = await _target.ApplyAsync(reply.Edits, ct);
-            _log($"② apply    → {apply.Message}");
-            if (!apply.Ok)
-            {
-                applySpan?.Fail(log: apply.Message).Dispose();
-                history.Add(new Turn(Role.User,
-                    $"Apply failed: {apply.Message}. Fix the path and emit the files again."));
-                continue;
-            }
-            applySpan?.Pass(apply.Message).Dispose();
-
-            // ③-a 검증: 컴파일
-            var compileSpan = Begin(SpanKind.Node, "VerifyCompile");
-            var verify = await _target.VerifyAsync(new VerifySpec(VerifyKind.Compile), ct);
-            if (!verify.Ok)
-            {
-                _log($"③ verify   → {_target.LabelFor(VerifyKind.Compile)}: {verify.Errors.Count} error(s) ❌");
-                foreach (var e in verify.Errors.Take(5))
-                    _log($"      · {Feedback.Clip(e, 200)}");
-
-                // 모델에는 상위 N건만 가지만, 사람이 볼 전문은 span 에 매달아 둔다.
-                compileSpan?.Artifact("compile.log", string.Join("\n", verify.Errors) + "\n\n---\n" + verify.Log)
-                            .Fail(verify.Errors, Feedback.Clip(verify.Errors[0], 90)).Dispose();
-
-                // ④ 피드백 → 다음 스텝 ①로
-                history.Add(new Turn(Role.User, BuildErrorFeedback(verify.Errors)));
-                continue;
-            }
-            _log($"③ verify   → {_target.LabelFor(VerifyKind.Compile)} passed ✅");
-            compileSpan?.Pass().Dispose();
-
-            // ③-b 검증: 런타임 동작
-            // 테스트 파일이 왔으면 **테스트 러너**로 검증한다(레포에 남는 자산 + 다중 프레임 가능).
-            // 없으면 일회용 ASSERT 스니펫으로 대체한다. 사람이 준 assert 는 언제나 우선.
-            // 이번 응답에 테스트가 왔거나, 앞선 스텝에서 이미 적용해 뒀거나.
-            testsInProject |= reply.Edits.Any(e => IsTestFile(e.RelativePath));
-            var useTests = testsInProject && _options.Assert is null && _target.Supports(VerifyKind.Tests);
-            var testsOnly = _options.VerifyMode == VerifyMode.TestsOnly;
-
-            // TestsOnly: eval 을 아예 쓰지 않는다. 테스트가 없으면 통과시키지 않고 되돌려 요구한다.
-            if (testsOnly && !useTests)
-            {
-                _log("③ verify   → no test file ❌ (tests-only mode never runs temporary snippets)");
-                Begin(SpanKind.Node, "VerifyTests")?.Fail(log: "no test file (tests-only)").Dispose();
-                history.Add(new Turn(Role.User, TestsRequiredFeedback));
-                continue;
-            }
-
-            var assertCode = testsOnly ? null : (_options.Assert ?? EditParser.ParseAssert(reply.Text));
-
-            if (!useTests && (assertCode is null || !_target.Supports(VerifyKind.RuntimeAssert)))
-            {
-                // ⑤ 판정 — 런타임 기준이 없거나 타깃이 런타임 검증을 지원하지 않으면 여기까지가 성공 기준.
-                var why = assertCode is null ? "no runtime criterion" : "target has no runtime verification";
-                Begin(SpanKind.Node, "VerifyRuntime")?.Skip(why).Dispose();
-                return new LoopResult(true, step, $"applied and verified in {step} step(s) ({why})");
-            }
-
-            var runtimeKind = useTests ? VerifyKind.Tests : VerifyKind.RuntimeAssert;
-            var runtimeLabel = _target.LabelFor(runtimeKind);
-            var source = useTests ? "test files" : (_options.Assert is not null ? "user-supplied" : "AI-written");
-            _log($"③ verify   → running {runtimeLabel} ({source})");
-
-            var runtimeSpan = Begin(SpanKind.Node, useTests ? "VerifyTests" : "VerifyAssert");
-            var play = await _target.VerifyAsync(
-                new VerifySpec(runtimeKind, useTests ? null : assertCode), ct);
-
-            if (!play.Ok)
-            {
-                _log($"③ verify   → {runtimeLabel} failed ❌  {play.Log}");
-                foreach (var e in play.Errors.Take(3))
-                    _log($"      · {Feedback.Clip(e, 200)}");
-
-                runtimeSpan?.Artifact("runtime.log", string.Join("\n", play.Errors) + "\n\n---\n" + play.Log)
-                            .Fail(play.Errors, play.Log).Dispose();
-
-                // ④ 피드백 → 다음 스텝 ①로
-                history.Add(new Turn(Role.User,
-                    useTests ? BuildTestFeedback(play.Errors) : BuildAssertFeedback(play.Errors)));
-                continue;
-            }
-            _log($"③ verify   → {runtimeLabel} passed ✅  {play.Log}");
-            runtimeSpan?.Pass(string.IsNullOrWhiteSpace(play.Log) ? source : $"{source} · {play.Log}").Dispose();
-
-            // ③-c 검증: 성능 예산 — **기본적으로 루프 밖이다**(타깃이 Supports 로 선언한다).
-            // 에디터 측정치는 출시 성능이 아니라 상대 신호이고, 정확성과는 주기가 다른 질문이다.
-            // PERF 블록은 eval 로 측정하므로 tests-only 모드에서도 건너뛴다.
-            var perfSpec = testsOnly ? null : EditParser.ParsePerf(reply.Text);
-            if (perfSpec is null || !_target.Supports(VerifyKind.Performance))
-            {
-                // ⑤ 판정
-                Begin(SpanKind.Node, "VerifyPerf")?.Skip(perfSpec is null ? "no PERF block" : "unsupported").Dispose();
-                await CaptureEvidenceAsync(goal, ct);
-                return new LoopResult(true, step, $"applied and runtime-verified in {step} step(s)");
-            }
-
-            var perfLabel = _target.LabelFor(VerifyKind.Performance);
-            var perfSpan = Begin(SpanKind.Node, "VerifyPerf");
-            var perf = await _target.VerifyAsync(new VerifySpec(VerifyKind.Performance, perfSpec), ct);
+            // ② ~ ③ 노드 파이프라인
+            var (verdict, feedback) = await RunPipelineAsync(ctx, ct);
 
             // ⑤ 판정
-            if (perf.Ok)
+            if (verdict is not null)
             {
-                _log($"③ verify   → {perfLabel} passed ✅  {perf.Log}");
-                perfSpan?.Pass(perf.Log).Dispose();
                 await CaptureEvidenceAsync(goal, ct);
-                return new LoopResult(true, step, $"behavior AND performance verified in {step} step(s)");
+                return new LoopResult(true, step, verdict);
             }
 
-            _log($"③ verify   → {perfLabel} exceeded ❌  {perf.Log}");
-            foreach (var e in perf.Errors.Take(3))
-                _log($"      · {e}");
-            perfSpan?.Fail(perf.Errors, perf.Log).Dispose();
-
-            // ④ 피드백 → 다음 스텝 ①로
-            history.Add(new Turn(Role.User, BuildPerfFeedback(perf.Errors)));
+            // ④ 피드백 → 다음 시도 ①로
+            history.Add(new Turn(Role.User, feedback!));
         }
 
         return new LoopResult(false, _options.MaxSteps,
             $"gave up after {_options.MaxSteps} step(s) — still failing");
     }
 
-    // ── 프롬프트/피드백 (출력 계약을 시스템 프롬프트로 강제 — DESIGN.md §4) ──────────
+    /// <summary>
+    /// 파이프라인 한 바퀴. 전부 통과하면 판정 문장을, 하나라도 실패하면 피드백을 돌려준다.
+    /// **첫 Fail 에서 멈춘다** — 뒤 검증은 앞이 깨진 상태에서 의미가 없다.
+    /// </summary>
+    private async Task<(string? Verdict, string? Feedback)> RunPipelineAsync(RunContext ctx, CancellationToken ct)
+    {
+        var outcomes = new Dictionary<string, NodeOutcome>();
 
+        foreach (var node in _pipeline)
+        {
+            using var span = _trace?.Begin(SpanKind.Node, node.Name);
+            ctx.Artifact = span is null ? null : (name, content) => span.Artifact(name, content);
+
+            NodeOutcome outcome;
+            try
+            {
+                outcome = await node.RunAsync(ctx, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) when (node.Policy.FatalOnError)
+            {
+                outcome = new NodeOutcome.Fatal(ex.Message);
+            }
+            finally
+            {
+                ctx.Artifact = null;
+            }
+
+            outcomes[node.Name] = outcome;
+
+            switch (outcome)
+            {
+                case NodeOutcome.Pass p:
+                    span?.Pass(p.Log);
+                    break;
+
+                case NodeOutcome.Skip s:
+                    span?.Skip(s.Why);
+                    break;
+
+                case NodeOutcome.Blocked b:
+                    // [계획] 멀티세션 — 남의 잘못이므로 모델에 되먹이지 않는다(§7.5).
+                    span?.Blocked(b.By, b.Log);
+                    throw new InvalidOperationException($"blocked by {b.By}: {b.Log}");
+
+                case NodeOutcome.Fatal f:
+                    // 인프라 잘못은 모델이 고칠 수 없다 — 되먹이지 않고 중단한다(§5.3).
+                    span?.Fatal(f.Message);
+                    throw new InvalidOperationException(f.Message);
+
+                case NodeOutcome.Fail fail:
+                    span?.Fail(fail.Errors, fail.Log);
+                    return (null, fail.Feedback);
+            }
+        }
+
+        return (Summarize(ctx.Attempt, outcomes), null);
+    }
+
+    /// <summary>
+    /// 판정 문장 — **무엇까지 실제로 검증됐는지**를 그대로 말한다.
+    /// Skip 을 "통과"로 뭉뚱그리지 않는 게 핵심이다. 안 잰 걸 쟀다고 하면 안 된다.
+    /// </summary>
+    private static string Summarize(int step, IReadOnlyDictionary<string, NodeOutcome> outcomes)
+    {
+        var runtime = outcomes.GetValueOrDefault("VerifyRuntime");
+        var perf = outcomes.GetValueOrDefault("VerifyPerf");
+
+        if (perf is NodeOutcome.Pass)
+            return $"behavior AND performance verified in {step} step(s)";
+
+        if (runtime is NodeOutcome.Skip skipped)
+            return $"applied and verified in {step} step(s) ({skipped.Why})";
+
+        return $"applied and runtime-verified in {step} step(s)";
+    }
+
+    // ── 프롬프트 (출력 계약을 시스템 프롬프트로 강제 — DESIGN.md §4) ──────────────
+    //
     // 루프가 소유하는 건 **형식** 계약뿐이다. 언어·경로·검증 스니펫 같은 **내용 규격**은
     // 타깃(IExecTarget.GenerationBrief)이 준다 — 손이 바뀌면 만들 것도 바뀌기 때문(D5).
+    // 실패 피드백은 **그 실패를 발견한 노드**가 쓴다(Loop/Nodes/).
+
     private const string FormatContract = """
         You are a code generator running inside an automated apply → verify → repair loop.
 
@@ -271,41 +243,9 @@ public sealed class AgentLoop
         $"GOAL: {goal}\n\nProduce the files that satisfy this goal, using the output contract " +
         "(FILE: followed by a fenced code block).";
 
-    private const string TestsRequiredFeedback = """
-        This run verifies ONLY through compiled test files — temporary snippets are never executed.
-        Emit a PlayMode test file as a FILE block alongside the implementation.
-        If performance matters for this behavior, measure it inside the test with a Stopwatch and assert on it.
-        """;
-
     private const string NoEditsFeedback =
         "No FILE block was found in your response. Emit 'FILE: <path>' followed on the next line by a " +
         "fenced code block containing the COMPLETE file.";
-
-    private static string BuildErrorFeedback(IReadOnlyList<string> errors)
-    {
-        var list = Feedback.Bullets(errors);
-        return $"""
-            Compilation FAILED. Fix these compiler errors and emit the COMPLETE file(s) again
-            (no diffs, no partial edits — full file contents):
-
-            {list}
-            """;
-    }
-
-    // 도메인 스킬 위반 피드백. 파일이 프로젝트에 적용되기 전 단계라 "다시 내라"가 명확하다.
-    private static string BuildViolationFeedback(IReadOnlyList<SkillViolation> violations)
-    {
-        var list = Feedback.Bullets(violations.Select(v => $"{v.FilePath}: {v.Message}").ToList());
-        return $"""
-            DOMAIN RULE violations were found, so nothing was applied:
-
-            {list}
-
-            Fix the implementation so it follows the rules, then emit the COMPLETE file(s) again.
-            (For example: whatever you were looking up per-frame in Update should be resolved once in
-            Awake or Start and cached in a field.)
-            """;
-    }
 
     /// <summary>
     /// 히스토리를 최근 N턴으로 자른다(목표 턴은 항상 유지).
@@ -339,57 +279,5 @@ public sealed class AgentLoop
         }
         catch (OperationCanceledException) { throw; }
         catch { /* 증거 수집 실패가 판정을 뒤집지는 않는다 */ }
-    }
-
-    /// <summary>테스트 파일인가(경로 규약). 테스트가 오면 일회용 assert 대신 테스트 러너로 검증한다.</summary>
-    private static bool IsTestFile(string relativePath) =>
-        relativePath.Replace('\\', '/').Contains("/Tests/", StringComparison.OrdinalIgnoreCase) &&
-        relativePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
-
-    // 테스트 실패 피드백. 실패한 테스트 이름·메시지를 그대로 준다.
-    private static string BuildTestFeedback(IReadOnlyList<string> failures)
-    {
-        var list = Feedback.Bullets(failures);
-        return $"""
-            The Unity Test Runner reports FAILING TESTS:
-
-            {list}
-
-            Fix the ROOT CAUSE in the implementation and emit the COMPLETE file(s) again.
-            Do NOT weaken the tests to make them pass — the criteria stay, the behavior changes.
-            """;
-    }
-
-    // 동작은 맞지만 성능 예산을 넘긴 경우의 피드백.
-    // "예산을 늘려라"가 아니라 "구현을 빠르게 고쳐라"를 명시한다.
-    private static string BuildPerfFeedback(IReadOnlyList<string> failures)
-    {
-        var list = Feedback.Bullets(failures);
-        return $"""
-            The behavior is correct, but it EXCEEDED THE PERFORMANCE BUDGET (measured):
-
-            {list}
-
-            Remove the per-call cost from the hot path and emit the COMPLETE file(s) again.
-            Common causes: allocating a new collection/array per call, string concatenation or
-            interpolation, LINQ, boxing, looking up components every call.
-            → Hoist reusable buffers into fields; resolve lookups once in Awake/Start and cache them.
-            Do NOT raise maxTotalMs in the PERF block to pass — the budget stays, the implementation changes.
-            """;
-    }
-
-    // 컴파일은 통과했지만 런타임 동작이 틀린 경우의 피드백.
-    // "구현을 고쳐라"를 명시한다 — assert 를 느슨하게 고쳐 통과시키는 쪽으로 새는 걸 막기 위해서.
-    private static string BuildAssertFeedback(IReadOnlyList<string> failures)
-    {
-        var list = Feedback.Bullets(failures);
-        return $"""
-            It compiles, but the PLAY MODE RUNTIME CHECK FAILED:
-
-            {list}
-
-            Fix the ROOT CAUSE in the implementation (the FILE) and emit the COMPLETE file(s) again.
-            Do NOT weaken the assert to make it pass — the criteria stay, the behavior changes.
-            """;
     }
 }
