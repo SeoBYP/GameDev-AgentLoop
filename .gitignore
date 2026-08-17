@@ -25,6 +25,20 @@ Benchmark/Sandbox/Assets/Scripts/*.cs.meta
 Benchmark/Sandbox/Assets/Tests/PlayMode/*.cs
 Benchmark/Sandbox/Assets/Tests/PlayMode/*.cs.meta
 
+# 샘플 로그라이크 = 또 하나의 별도 Unity 프로젝트.
+# **샌드박스와 반대로 생성물(.cs)을 추적한다.** 이 샘플의 목적이 코드가 쌓이는 걸 보는 것이라
+# (ARCHITECTURE §8 코드 부패), git 히스토리에 축적이 남아야 잴 수 있다.
+Sample/Roguelike/.agentloop/*
+!Sample/Roguelike/.agentloop/layout.json
+Sample/Roguelike/[Ll]ibrary/
+Sample/Roguelike/[Tt]emp/
+Sample/Roguelike/[Ll]ogs/
+Sample/Roguelike/[Oo]bj/
+Sample/Roguelike/[Uu]ser[Ss]ettings/
+Sample/Roguelike/[Bb]uild*/
+Sample/Roguelike/*.csproj
+Sample/Roguelike/*.sln
+
 # --- Unity generated ---
 /[Ll]ibrary/
 /[Tt]emp/

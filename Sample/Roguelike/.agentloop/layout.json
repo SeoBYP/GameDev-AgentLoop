@@ -1,0 +1,6 @@
+{
+    "scriptDir": "Assets/Scripts",
+    "testDir": "Assets/Tests/PlayMode",
+    "runtimeAssembly": "Roguelike.Runtime",
+    "testAssembly": "Roguelike.Tests"
+}
